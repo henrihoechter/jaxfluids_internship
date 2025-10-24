@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Make a Python 3.11 venv and install pip
 RUN curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py && \
     python3.11 /tmp/get-pip.py && rm /tmp/get-pip.py && \
-    python3.11 -m venv /opt/venv
+    python3.11 -m venv /opt/venv && chown -R ${USER_UID}:${USER_GID} /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 
 ############################################
@@ -50,11 +50,13 @@ RUN groupadd --gid ${USER_GID} ${USERNAME} && \
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir \
       jax \
+      jaxtyping \
       plotly \
       tensorboard \
       pytest \
       pre-commit black ruff \
-      ipykernel
+      ipykernel \
+      pydantic pydantic-settings
 
 ############################################
 # Pre-commit: install hooks if repo mounts / has config
