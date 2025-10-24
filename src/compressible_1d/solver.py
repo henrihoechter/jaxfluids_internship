@@ -37,7 +37,7 @@ def lax_friedrichs(
     a_max = 0.0
     if diffusivity_scale > 0.0:
         raise NotImplementedError(
-            "Diffusivity not yet implemented in Lax-Friedrichs Riedmann solver."
+            "Diffusivity not yet implemented in Lax-Friedrichs Riemann solver."
         )
     return 0.5(
         flux_function(U_r, gamma) + flux_function(U_l, gamma)
