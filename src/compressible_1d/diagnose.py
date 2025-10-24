@@ -22,3 +22,11 @@ def check_nonnegativity(U) -> None:
 
     if jnp.any(U[2, :] < 0.0):
         raise ValueError("Energy density negative.")
+
+
+# TODO: check for NaN and Inf
+
+
+def check_all(U, U_ref) -> None:
+    check_conservation(U, U_ref)
+    check_nonnegativity(U)
