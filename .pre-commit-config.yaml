@@ -8,5 +8,5 @@ repos:
     rev: v0.6.9
     hooks:
       - id: ruff
-        args: ["--fix"]
+        args: ["--fix", "--extend-ignore=F722"]
       - id: ruff-format
