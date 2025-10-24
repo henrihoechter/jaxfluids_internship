@@ -33,6 +33,8 @@
   },
   "features": {},
   "postCreateCommand": "python -m ipykernel install --user --name jax-1d-cfd || true",
-  "updateContentCommand": "pre-commit install || true"
+  "updateContentCommand": "pre-commit install || true",
+  "containerEnv": { "PYTHONPATH": "/workspace/src" }
+
 
 }
