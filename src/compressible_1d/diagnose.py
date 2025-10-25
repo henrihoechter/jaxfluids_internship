@@ -24,9 +24,15 @@ def check_nonnegativity(U) -> None:
         raise ValueError("Energy density negative.")
 
 
-# TODO: check for NaN and Inf
+def check_nan_inf(U) -> None:
+    if jnp.any(jnp.isnan(U)):
+        raise ValueError("NaN values present in solution.")
+
+    if jnp.any(jnp.isinf(U)):
+        raise ValueError("Inf values present in solution.")
 
 
 def check_all(U, U_ref) -> None:
-    check_conservation(U, U_ref)
+    check_nan_inf(U)
     check_nonnegativity(U)
+    check_conservation(U, U_ref)
