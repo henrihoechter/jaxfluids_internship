@@ -28,3 +28,13 @@ def test_check_nonnegativity_with_wrong_energy():
     )
     with pytest.raises(ValueError, match="Energy"):
         diagnose.check_nonnegativity(U_test)
+
+
+def test_check_nan_inf():
+    U_test_nan = jnp.array([[jnp.nan, 1.0], [1.0, 1.0], [1.0, 1.0]])
+    with pytest.raises(ValueError, match="NaN"):
+        diagnose.check_nan_inf(U_test_nan)
+
+    U_test_inf = jnp.array([[jnp.inf, 1.0], [1.0, 1.0], [1.0, 1.0]])
+    with pytest.raises(ValueError, match="Inf"):
+        diagnose.check_nan_inf(U_test_inf)
