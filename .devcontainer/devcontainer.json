@@ -12,6 +12,7 @@
   "workspaceFolder": "/workspace",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
   "remoteUser": "devuser",
+
   "customizations": {
     "vscode": {
       "extensions": [
@@ -23,7 +24,7 @@
         "eamodio.gitlens"
       ],
       "settings": {
-        "python.defaultInterpreterPath": "/opt/venv/bin/python",
+        "python.defaultInterpreterPath": "/workspace/.venv/bin/python",
         "python.terminal.activateEnvironment": true,
         "editor.formatOnSave": true,
         "python.formatting.provider": "black",
@@ -31,10 +32,19 @@
       }
     }
   },
-  "features": {},
+
+  "containerEnv": {
+    "PYTHONPATH": "/workspace/src"
+  },
+
+  "mounts": [
+    "source=${env:HOME}/.ssh,target=/home/devuser/.ssh,type=bind,consistency=cached,readonly",
+    "source=${env:HOME}/.gitconfig,target=/home/devuser/.gitconfig,type=bind,consistency=cached,readonly",
+    "source=${env:HOME}/.config/gh,target=/home/devuser/.config/gh,type=bind,consistency=cached,readonly"
+  ],
+
   "postCreateCommand": "python -m ipykernel install --user --name jax-1d-cfd || true",
-  "updateContentCommand": "pre-commit install || true",
-  "containerEnv": { "PYTHONPATH": "/workspace/src" }
 
-
+  // Start a container-local ssh-agent and load keys if present
+  "postStartCommand": "/usr/local/bin/ensure-ssh-agent.sh id_ed25519_personal id_ed25519_work || true"
 }
