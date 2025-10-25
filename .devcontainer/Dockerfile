@@ -44,6 +44,12 @@ ENV PRE_COMMIT_HOME="/home/${USERNAME}/.cache/pre-commit"
 COPY --chown=${USERNAME}:${USERNAME} docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
+# Ensure that any interactive shell automatically prefers the project venv
+RUN echo '\n# Activate project venv automatically\n' \
+    'if [ -d /workspace/.venv/bin ]; then\n' \
+    '  export PATH="/workspace/.venv/bin:$PATH"\n' \
+    'fi\n' >> /home/devuser/.bashrc
+    
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["/bin/bash"]
 
