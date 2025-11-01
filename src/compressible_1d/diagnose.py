@@ -44,3 +44,9 @@ def check_all(U, U_ref, debug: bool, abort: bool = True) -> None:
     check_nan_inf(U)
     check_nonnegativity(U)
     check_conservation(U, U_ref, debug, abort)
+
+
+def live_diagnostics(U, step):
+    print(
+        f"step {step}, \tmass density max-min: {jnp.max(U[0, :]) - jnp.min(U[0, :]):.4e}"
+    )
