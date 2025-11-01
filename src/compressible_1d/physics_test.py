@@ -3,8 +3,6 @@ import jax.numpy as jnp
 from compressible_1d import physics
 
 
-
-
 def test_to_conserved():
     U1 = jnp.array([1.225, 0.0, 1e5])
     U2 = jnp.array([0.4, 10.0, 1.5e5])

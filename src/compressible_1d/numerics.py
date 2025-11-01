@@ -5,12 +5,13 @@ from dataclasses import dataclass
 
 from compressible_1d import boundary_conditions, solver, diagnose, numerics
 
+
 @dataclass
 class Input:
     U_init: Float[Array, "3 n_cells"]
     gamma: float
-    boundary_condition:str
-    solver_type:str 
+    boundary_condition: str
+    solver_type: str
     delta_x: float
     delta_t: float
     n_steps: int
@@ -57,9 +58,14 @@ def step(
 def run(input: Input):
     U_field = input.U_init
 
-    step = jax.jit(numerics.step, static_argnames=('n_ghost_cells','boundary_condition_type', 'solver_type'))
+    step = jax.jit(
+        numerics.step,
+        static_argnames=("n_ghost_cells", "boundary_condition_type", "solver_type"),
+    )
 
-    U_solutions = jnp.empty((input.U_init.shape[0],input.U_init.shape[1], input.n_steps))
+    U_solutions = jnp.empty(
+        (input.U_init.shape[0], input.U_init.shape[1], input.n_steps)
+    )
 
     U_solutions = U_solutions.at[:, :, 0].set(input.U_init)
     for i in range(input.n_steps):

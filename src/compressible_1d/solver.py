@@ -121,5 +121,3 @@ def harten_lax_van_leer_contact(
     F = jnp.where(s_r < 0.0, flux_function(U_r, gamma=gamma), F)
 
     return F
-
-
