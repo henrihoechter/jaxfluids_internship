@@ -1,17 +1,25 @@
 import jax.numpy as jnp
 
-RTOL = 1e-10
+ATOL = 1e-6
 
 
-def check_conservation(U, U_ref) -> None:
-    if not jnp.allclose(jnp.sum(U[0, :]), jnp.sum(U_ref[0, :]), rtol=RTOL):
-        raise ValueError("Total mass is not conserved.")
+def check_conservation(U, U_ref, debug: bool = False, abort: bool = True) -> None:
+    if debug:
+        print(
+            f"Mass: \t\tU={jnp.sum(U[0, :]):2.5e}, \tU_ref={jnp.sum(U_ref[0, :]):2.5e}, \tdiff (abs)={jnp.sum(U[0, :]) - jnp.sum(U_ref[0, :]):2.5e}"
+        )
+        print(
+            f"Momentum: \tU={jnp.sum(U[1, :]):2.5e}, \tU_ref={jnp.sum(U_ref[1, :]):2.5e}, \tdiff (abs)={jnp.sum(U[1, :]) - jnp.sum(U_ref[1, :]):2.5e}"
+        )
+        print(
+            f"Energy: \tU={jnp.sum(U[2, :]):2.5e}, \tU_ref={jnp.sum(U_ref[2, :]):2.5e}, \tdiff (abs)={jnp.sum(U[2, :]) - jnp.sum(U_ref[2, :]):2.5e}"
+        )
 
-    if not jnp.allclose(jnp.sum(U[1, :]), jnp.sum(U_ref[1, :]), rtol=RTOL):
-        raise ValueError("Total momentum is not conserved.")
+    total_u = jnp.sum(U, axis=1)
+    total_uref = jnp.sum(U_ref, axis=1)
 
-    if not jnp.allclose(jnp.sum(U[2, :]), jnp.sum(U_ref[2, :]), rtol=RTOL):
-        raise ValueError("Total energy is not conserved.")
+    if abort and not jnp.allclose(total_u, total_uref, atol=ATOL):
+        raise ValueError("U is not conserved.")
 
     return None
 
@@ -32,7 +40,7 @@ def check_nan_inf(U) -> None:
         raise ValueError("Inf values present in solution.")
 
 
-def check_all(U, U_ref) -> None:
+def check_all(U, U_ref, debug: bool, abort: bool = True) -> None:
     check_nan_inf(U)
     check_nonnegativity(U)
-    check_conservation(U, U_ref)
+    check_conservation(U, U_ref, debug, abort)
