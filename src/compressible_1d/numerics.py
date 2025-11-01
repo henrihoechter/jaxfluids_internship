@@ -36,3 +36,10 @@ def step(
     dU_dt = -1 / delta_x * (flux_R - flux_L)
 
     return U_field + delta_t * dU_dt
+def calculate_dt(
+    U: Float[Array, "3 N"], gamma: float, delta_x: float, cmax: float = 1.0
+) -> float:
+    def a(U: Float[Array, "3 N"], gamma: float):
+        return jnp.sqrt(gamma * U[2, :] / U[0, :])
+
+    return cmax * delta_x / jnp.max(jnp.abs(U[1, :]) + a(U, gamma))

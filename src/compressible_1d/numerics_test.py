@@ -18,3 +18,17 @@ def test_step_steady_state():
 
     if not jnp.allclose(U_next, U_expected):
         raise ValueError("Step function does not preserve steady state solution.")
+
+
+def test_calculate_dt():
+    U = jnp.array([1.225, 10.0, 1e5])[:, jnp.newaxis]
+    gamma = 1.4
+    delta_x = 1.0
+
+    expected_delta_t = 2.873053814e-3
+
+    delta_t = numerics.calculate_dt(U, gamma, delta_x, cmax=1.0)
+    print(delta_t)
+
+    if not jnp.allclose(delta_t, expected_delta_t):
+        raise ValueError("delta_t was not computed correctly.")
