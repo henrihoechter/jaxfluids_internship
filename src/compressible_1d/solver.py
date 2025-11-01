@@ -34,11 +34,22 @@ def lax_friedrichs(
     diffusivity_scale: pydantic.NonNegativeFloat,
 ) -> Float[Array, "3 N"]:
     """Computes flux on cell boundary"""
-    a_max = 0.0
-    if diffusivity_scale > 0.0:
-        raise NotImplementedError(
-            "Diffusivity not yet implemented in Lax-Friedrichs Riemann solver."
-        )
+
+    # a_max = max( |u_l| + c_l , |u_r| + c_r)
+    a_max = jnp.maximum(
+        jnp.abs(U_l[1, :] / U_l[0, :])
+        + jnp.sqrt(
+            gamma
+            * (gamma - 1)
+            * (U_l[2, :] / U_l[0, :] - 0.5 * (U_l[1, :] / U_l[0, :]) ** 2)
+        ),
+        jnp.abs(U_r[1, :] / U_r[0, :])
+        + jnp.sqrt(
+            gamma
+            * (gamma - 1)
+            * (U_r[2, :] / U_r[0, :] - 0.5 * (U_r[1, :] / U_r[0, :]) ** 2)
+        ),
+    )
     return 0.5 * (
         flux_function(U_r, gamma) + flux_function(U_l, gamma)
     ) - 0.5 * diffusivity_scale * a_max * (U_r - U_l)
