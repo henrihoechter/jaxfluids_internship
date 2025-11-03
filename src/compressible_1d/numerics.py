@@ -43,6 +43,8 @@ def step(
         flux = solver.lax_friedrichs(U_L, U_R, gamma=gamma, diffusivity_scale=1.0)
     elif solver_type == "hllc":
         flux = solver.harten_lax_van_leer_contact(U_L, U_R, gamma=gamma)
+    elif solver_type == "exact":
+        flux = solver.exact_riemann(U_L, U_R, gamma=gamma)
     else:
         raise ValueError("Select solver.")
 
