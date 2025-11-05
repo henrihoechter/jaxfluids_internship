@@ -69,14 +69,9 @@ def harten_lax_van_leer_contact(
     a_l = physics.a(U_l_primitives, gamma=gamma)
     a_r = physics.a(U_r_primitives, gamma=gamma)
 
-    s_l = jnp.min(
-        jnp.stack([U_l_primitives[1, :] - a_l, U_r_primitives[1, :] - a_r], axis=0),
-        axis=0,
-    )
-    s_r = jnp.max(
-        jnp.stack([U_l_primitives[1, :] + a_l, U_r_primitives[1, :] + a_r], axis=0),
-        axis=0,
-    )
+    a_max = jnp.maximum(a_l, a_r)
+    s_l = jnp.minimum(U_l_primitives[1, :], U_r_primitives[1, :]) - a_max
+    s_r = jnp.maximum(U_l_primitives[1, :], U_r_primitives[1, :]) + a_max
 
     s_star = (
         U_r_primitives[2, :]
@@ -97,7 +92,7 @@ def harten_lax_van_leer_contact(
         - U_l_primitives[2, :] * U_l_primitives[1, :]
         + p_star * s_star
     ) / (s_l - s_star)
-    U_star_l = jnp.stack([rho_l, rho_l * s_l, rhoE_l])
+    U_star_l = jnp.stack([rho_l, rho_l * s_star, rhoE_l])
 
     rho_r = U_r_primitives[0, :] * (s_r - U_r_primitives[1, :]) / (s_r - s_star)
     rhoE_r = (
@@ -105,7 +100,7 @@ def harten_lax_van_leer_contact(
         - U_r_primitives[2, :] * U_r_primitives[1, :]
         + p_star * s_star
     ) / (s_r - s_star)
-    U_star_r = jnp.stack([rho_r, rho_r * s_r, rhoE_r])
+    U_star_r = jnp.stack([rho_r, rho_r * s_star, rhoE_r])
 
     F = jnp.empty(U_l.shape)
     F = jnp.where(s_l >= 0.0, flux_function(U_l, gamma=gamma), F)
