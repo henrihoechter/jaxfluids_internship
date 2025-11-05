@@ -11,3 +11,4 @@ ruff
 ipykernel
 pydantic
 pydantic-settings
+nbformat

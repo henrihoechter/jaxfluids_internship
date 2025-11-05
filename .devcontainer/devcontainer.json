@@ -37,12 +37,6 @@
     "PYTHONPATH": "/workspace/src"
   },
 
-  "mounts": [
-    "source=${env:HOME}/.ssh,target=/home/devuser/.ssh,type=bind,consistency=cached,readonly",
-    "source=${env:HOME}/.gitconfig,target=/home/devuser/.gitconfig,type=bind,consistency=cached,readonly",
-    "source=${env:HOME}/.config/gh,target=/home/devuser/.config/gh,type=bind,consistency=cached,readonly"
-  ],
-
   "postCreateCommand": "python -m ipykernel install --user --name jax-1d-cfd || true",
 
   // Start a container-local ssh-agent and load keys if present
