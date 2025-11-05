@@ -2,6 +2,7 @@ from jaxtyping import Float, Array
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import jax.numpy as jnp
+from compressible_1d import physics
 
 
 def plot_U_field(U_field: Float[Array, "3 n_cells n_time_steps"]) -> go.Figure:
@@ -140,5 +141,83 @@ def plot_U_heatmaps(U_field) -> go.Figure:
     # Optional: keep upper x tick labels off for clarity
     fig.update_xaxes(showticklabels=False, row=1, col=1)
     fig.update_xaxes(showticklabels=False, row=2, col=1)
+
+    return fig
+
+
+def plot_U_slice(
+    U_field: Float[Array, "3 n_cells n_time_steps"],
+    time_id: int,
+    show_conservative: bool = True,
+    gamma: float | None = None,
+) -> go.Figure:
+    """
+    Plot a single time slice of U_field along the spatial domain (cell index).
+
+    Args:
+        U_field: Array of shape (3, n_cells, n_time_steps)
+        time_id: Index of the time step to visualize
+        conservative: If True, plot conservative vars (ρ, ρu, ρE),
+                      otherwise plot primitive vars (ρ, u, p)
+    """
+    # Convert variables if needed
+    if not show_conservative:
+        assert gamma is not None
+        U_field = physics.to_primitives(U_field, gamma=gamma)
+
+    U_np = jnp.asarray(U_field)
+    n_cells = U_np.shape[1]
+    x = jnp.arange(n_cells)
+
+    # Extract slices
+    field1 = U_np[0, :, time_id]
+    field2 = U_np[1, :, time_id]
+    field3 = U_np[2, :, time_id]
+
+    # Labeling based on mode
+    if show_conservative:
+        titles = ("Density ρ", "Momentum ρu", "Energy ρE")
+        ylabels = ("ρ", "ρu", "ρE")
+        colors = ("blue", "orange", "red")
+    else:
+        titles = ("Density ρ", "Velocity u", "Pressure p")
+        ylabels = ("ρ", "u", "p")
+        colors = ("blue", "red", "green")
+
+    # Create subplots
+    fig = make_subplots(
+        rows=3,
+        cols=1,
+        shared_xaxes=True,
+        subplot_titles=titles,
+        vertical_spacing=0.08,
+    )
+
+    # Add traces
+    for i, (data, color, ylabel) in enumerate(
+        zip([field1, field2, field3], colors, ylabels), start=1
+    ):
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=data,
+                mode="lines",
+                line=dict(color=color),
+                name=ylabel,
+            ),
+            row=i,
+            col=1,
+        )
+        fig.update_yaxes(title_text=ylabel, row=i, col=1)
+
+    # Axis labels and layout
+    fig.update_xaxes(title_text="Cell index", row=3, col=1)
+    fig.update_layout(
+        title=f"{'Conservative' if show_conservative else 'Primitive'} Variables at Time Step {time_id}",
+        height=850,
+        width=900,
+        showlegend=False,
+        margin=dict(l=60, r=30, t=60, b=50),
+    )
 
     return fig
