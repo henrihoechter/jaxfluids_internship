@@ -1,8 +1,6 @@
 import pydantic
-
-from jax import numpy as jnp
-from jax import lax
 from jaxtyping import Float, Array
+from jax import numpy as jnp, lax
 
 from compressible_1d import physics
 
@@ -119,317 +117,228 @@ def harten_lax_van_leer_contact(
     return F
 
 
-EPS = 1e-14
-P_MIN = 1e-12
-P_MAX = 1e12
+# exact riemann ()
 
-def _cons_from_prim(rho, u, p, gamma):
-    mom = rho * u
-    E = p / (gamma - 1.0) + 0.5 * rho * u * u
-    return jnp.stack([rho, mom, E], axis=0)
 
-# --- Branch functions -------------------------------------------------------
+# ------------------------------------------------------------
+# primitives <-> conserved, sound speed
+# ------------------------------------------------------------
+def _primitives_from_U(U: Float[Array, "3 ..."], gamma: float):
+    rho = jnp.clip(U[0], 1e-16)
+    u = U[1] / rho
+    p = (U[2] - 0.5 * rho * u**2) * (gamma - 1.0)
+    p = jnp.clip(p, 1e-16)
+    return rho, u, p
 
-def _f_rare(p, rho, pK, aK, gamma):
-    # f(p) and df/dp for rarefaction branch (vectorized)
-    pr = jnp.maximum(p, P_MIN) / pK
+
+def _U_from_rho_u_p(rho, u, p, gamma: float):
+    rho = jnp.clip(rho, 1e-16)
+    p = jnp.clip(p, 1e-16)
+    rho_u = rho * u
+    rho_E = p / (gamma - 1.0) + 0.5 * rho * u**2
+    return jnp.stack([rho, rho_u, rho_E], axis=0)
+
+
+def _a_from_rho_p(rho, p, gamma: float):
+    return jnp.sqrt(gamma * p / jnp.clip(rho, 1e-16))
+
+
+def _phi_side(p, rho_i, u_i, p_i, a_i, gamma: float):
+    """Computes function and derivative that relates pressure to velocity change
+    across a wave."""
+    p = jnp.clip(p, 1e-16)
+    pi = jnp.clip(p_i, 1e-16)
+    rhoi = jnp.clip(rho_i, 1e-16)
+    ai = jnp.clip(a_i, 1e-16)
+
+    # Rarefaction branch
     expo = (gamma - 1.0) / (2.0 * gamma)
-    f = (2.0 * aK / (gamma - 1.0)) * (pr**expo - 1.0)
-    df = (aK / (gamma * pK)) * pr**(expo - 1.0)
+    rar_fac = (p / pi) ** expo
+    f_rar = (2.0 * ai / (gamma - 1.0)) * (rar_fac - 1.0)
+    df_rar = (1.0 / (rhoi * ai)) * (p / pi) ** (-(gamma + 1.0) / (2.0 * gamma))
+
+    # Shock branch
+    A = 2.0 / ((gamma + 1.0) * rhoi)
+    B = (gamma - 1.0) / (gamma + 1.0) * pi
+    sqrt_term = jnp.sqrt(A / (p + B))
+    f_sh = (p - pi) * sqrt_term
+    df_sh = sqrt_term * (1.0 - 0.5 * (p - pi) / (p + B))
+
+    is_shock = p > pi
+    f = jnp.where(is_shock, f_sh, f_rar)
+    df = jnp.where(is_shock, df_sh, df_rar)
     return f, df
 
-def _f_shock(p, rho, pK, gamma):
-    # f(p) and df/dp for shock branch (vectorized)
-    A = 2.0 / ((gamma + 1.0) * rho)
-    B = (gamma - 1.0) / (gamma + 1.0) * pK
-    denom = jnp.maximum(p + B, EPS)
-    root = jnp.sqrt(A / denom)
-    f = (p - pK) * root
-    df = root * (1.0 - 0.5 * (p - pK) / denom)
-    return f, df
 
-def _phi_and_dphi(p, rhoL, uL, pL, aL, rhoR, uR, pR, aR, gamma):
-    # choose branch per interface
-    left_is_rare  = p <= pL
-    right_is_rare = p <= pR
+def _pstar_initial(rhoL, uL, pL, aL, rhoR, uR, pR, aR, gamma: float):
+    p_pv = 0.5 * (pL + pR) - 0.125 * (uR - uL) * (rhoL + rhoR) * (aL + aR)
+    p_pv = jnp.maximum(1e-16, p_pv)
 
-    fL_r, dL_r = _f_rare(p, rhoL, pL, aL, gamma)
-    fL_s, dL_s = _f_shock(p, rhoL, pL, gamma)
-    fL  = jnp.where(left_is_rare,  fL_r,  fL_s)
-    dL  = jnp.where(left_is_rare,  dL_r,  dL_s)
+    pmin = jnp.minimum(pL, pR)
+    pmax = jnp.maximum(pL, pR)
 
-    fR_r, dR_r = _f_rare(p, rhoR, pR, aR, gamma)
-    fR_s, dR_s = _f_shock(p, rhoR, pR, gamma)
-    fR  = jnp.where(right_is_rare, fR_r,  fR_s)
-    dR  = jnp.where(right_is_rare, dR_r,  dR_s)
+    # Two-rarefaction estimate
+    alpha = (gamma - 1.0) / (2.0 * gamma)
+    denom_tr = aL * jnp.power(jnp.maximum(pL, 1e-16), -alpha) + aR * jnp.power(
+        jnp.maximum(pR, 1e-16), -alpha
+    )
+    base_tr = (aL + aR - 0.5 * (gamma - 1.0) * (uR - uL)) / jnp.clip(denom_tr, 1e-16)
+    p_tr = jnp.maximum(1e-16, jnp.power(jnp.maximum(base_tr, 1e-16), 1.0 / alpha))
 
-    phi  = fL + fR + (uR - uL)
-    dphi = dL + dR
-    return phi, dphi
+    # Two-shock estimate
+    AL = 2.0 / ((gamma + 1.0) * jnp.clip(rhoL, 1e-16))
+    BL = (gamma - 1.0) / (gamma + 1.0) * pL
+    AR = 2.0 / ((gamma + 1.0) * jnp.clip(rhoR, 1e-16))
+    BR = (gamma - 1.0) / (gamma + 1.0) * pR
+    gL = jnp.sqrt(AL / (pL + BL))
+    gR = jnp.sqrt(AR / (pR + BR))
+    p_ts = (gL * pL + gR * pR - (uR - uL)) / jnp.clip(gL + gR, 1e-16)
+    p_ts = jnp.maximum(1e-16, p_ts)
 
-def _pvrs_guess(rhoL, uL, pL, aL, rhoR, uR, pR, aR, gamma):
-    cbar = 0.5 * (aL + aR)
-    pavg = 0.5 * (pL + pR) - 0.125 * (uR - uL) * (rhoL + rhoR) * cbar
-    return jnp.clip(pavg, P_MIN, P_MAX)
+    p0 = jnp.where(p_pv < pmin, p_tr, p_pv)
+    p0 = jnp.where(p_pv > pmax, p_ts, p0)
+    return jnp.maximum(1e-16, p0)
 
-def _two_rarefaction_guess(rhoL, uL, pL, aL, rhoR, uR, pR, aR, gamma):
-    expo = (2.0 * gamma) / (gamma - 1.0)
-    alphaL = aL * pL ** (-(gamma - 1.0) / (2.0 * gamma))
-    alphaR = aR * pR ** (-(gamma - 1.0) / (2.0 * gamma))
-    term = (aL + aR) - 0.5 * (gamma - 1.0) * (uR - uL)
-    p = (term / (alphaL + alphaR)) ** expo
-    return jnp.clip(p, P_MIN, P_MAX)
 
-def _two_shock_guess(rhoL, uL, pL, rhoR, uR, pR, gamma):
-    GL = jnp.sqrt( (2.0 / ((gamma + 1.0) * rhoL)) / jnp.maximum((pL * (gamma - 1.0) / (gamma + 1.0)), EPS) )
-    GR = jnp.sqrt( (2.0 / ((gamma + 1.0) * rhoR)) / jnp.maximum((pR * (gamma - 1.0) / (gamma + 1.0)), EPS) )
-    p = (GL * pL + GR * pR - (uR - uL)) / (GL + GR)
-    return jnp.clip(p, P_MIN, P_MAX)
+def _solve_pstar(rhoL, uL, pL, aL, rhoR, uR, pR, aR, gamma: float):
+    """Solves for p* using Newton-Raphson with fixed number of iterations.
 
-def _vacuum_flag(uL, aL, uR, aR, gamma):
-    return (uR - uL) >= (2.0 / (gamma - 1.0)) * (aL + aR)
+    Goal: find p* at the location where the left and the right wave predict the same
+    velocity. pressure and velocity must be continous across the discontinuity.
+    """
+    p0 = _pstar_initial(rhoL, uL, pL, aL, rhoR, uR, pR, aR, gamma)
+    max_iter = 25
+    tol = 1e-8
 
-# --- Newton iteration (vectorized) -----------------------------------------
+    def body(i, carry):
+        p = carry  # current guess for p*
+        fL, dfL = _phi_side(p, rhoL, uL, pL, aL, gamma)  # wave contribution left
+        fR, dfR = _phi_side(p, rhoR, uR, pR, aR, gamma)  # wave contribution right
+        phi = fL + fR + (uR - uL)  # residual
+        dphi = dfL + dfR  # residual derivative
+        dp = phi / jnp.clip(dphi, 1e-16)  # step
+        pnew = jnp.maximum(1e-16, p - dp)  # update
 
-def _solve_p_star(rhoL, uL, pL, aL, rhoR, uR, pR, aR, gamma):
-    # initial guess
-    p0 = _pvrs_guess(rhoL, uL, pL, aL, rhoR, uR, pR, aR, gamma)
-
-    def newton_body(p, _):
-        phi, dphi = _phi_and_dphi(p, rhoL, uL, pL, aL, rhoR, uR, pR, aR, gamma)
-        step = phi / jnp.where(jnp.abs(dphi) > EPS, dphi, jnp.sign(dphi) * EPS)
-        p_new = jnp.clip(p - step, P_MIN, P_MAX)
-        return p_new, None
-
-    # fixed number of iterations for JIT-friendliness
-    p, _ = lax.scan(newton_body, p0, xs=None, length=20)
-
-    # (optional) single safeguard iteration with two-shock/two-rarefaction mix
-    two_shock = _two_shock_guess(rhoL, uL, pL, rhoR, uR, pR, gamma)
-    two_rare  = _two_rarefaction_guess(rhoL, uL, pL, aL, rhoR, uR, pR, aR, gamma)
-    # if PVRS fell way below both pL and pR, favor two-shock; else two-rarefaction
-    p_seed = jnp.where(p0 < jnp.minimum(pL, pR), two_shock, two_rare)
-
-    def refine_once(p):
-        phi, dphi = _phi_and_dphi(p, rhoL, uL, pL, aL, rhoR, uR, pR, aR, gamma)
-        return jnp.clip(p - phi / jnp.where(jnp.abs(dphi) > EPS, dphi, jnp.sign(dphi) * EPS), P_MIN, P_MAX)
-
-    p_ref = refine_once(p_seed)
-    # pick the better of (p, p_ref) by |phi|
-    phi_p, _ = _phi_and_dphi(p,      rhoL, uL, pL, aL, rhoR, uR, pR, aR, gamma)
-    phi_q, _ = _phi_and_dphi(p_ref,  rhoL, uL, pL, aL, rhoR, uR, pR, aR, gamma)
-    p_star = jnp.where(jnp.abs(phi_q) < jnp.abs(phi_p), p_ref, p)
-    return p_star
-
-# --- Wave speeds and star densities ----------------------------------------
-
-def _star_state(p_star, rhoL, uL, pL, rhoR, uR, pR, gamma):
-    # fL/fR at p* for u*
-    def f_side(p, rho, u, pK):
-        # mixture of rare/shock at p vs pK
-        # Need aK only for rarefaction
+        # freeze converged entries to avoid oscillations across iterations
+        done = (jnp.abs(phi) < tol) | (jnp.abs(dp) / jnp.maximum(pnew, 1e-16) < 1e-8)
+        p = jnp.where(done, p, pnew)
         return p
 
-    # left branch
-    aL = jnp.sqrt(gamma * pL / rhoL)
-    aR = jnp.sqrt(gamma * pR / rhoR)
+    pstar = lax.fori_loop(0, max_iter, body, p0)
+    return jnp.maximum(1e-16, pstar)
 
-    fL_r, _ = _f_rare (p_star, rhoL, pL, aL, gamma)
-    fL_s, _ = _f_shock(p_star, rhoL, pL, gamma)
-    fR_r, _ = _f_rare (p_star, rhoR, pR, aR, gamma)
-    fR_s, _ = _f_shock(p_star, rhoR, pR, gamma)
 
-    left_is_rare  = p_star <= pL
-    right_is_rare = p_star <= pR
+def _ustar(pstar, rhoL, uL, pL, aL, rhoR, uR, pR, aR, gamma: float):
+    fL, _ = _phi_side(pstar, rhoL, uL, pL, aL, gamma)
+    fR, _ = _phi_side(pstar, rhoR, uR, pR, aR, gamma)
+    return 0.5 * (uL + uR + fR - fL)
 
-    fL = jnp.where(left_is_rare,  fL_r, fL_s)
-    fR = jnp.where(right_is_rare, fR_r, fR_s)
 
-    u_star = 0.5 * (uL + uR + fR - fL)
+def _left_at_interface(pstar, ustar, rhoL, uL, pL, aL, gamma: float):
+    is_shock = pstar > pL
 
-    # star densities
-    # rarefaction: rho* = rho (p*/p)^{1/gamma}
-    # shock:       rho* = rho * (p*/p + (γ-1)/(γ+1)) / ((γ-1)/(γ+1) * p*/p + 1)
-    ratioL = p_star / pL
-    ratioR = p_star / pR
-    rrL = rhoL * ratioL ** (1.0 / gamma)
-    rrR = rhoR * ratioR ** (1.0 / gamma)
-    z = (gamma - 1.0) / (gamma + 1.0)
-    rsL = rhoL * (ratioL + z) / (z * ratioL + 1.0)
-    rsR = rhoR * (ratioR + z) / (z * ratioR + 1.0)
+    # Left shock speed S_L
+    SL = uL - aL * jnp.sqrt(
+        0.5 * (gamma + 1.0) / gamma * (pstar / pL) + 0.5 * (gamma - 1.0) / gamma
+    )
 
-    rhoL_star = jnp.where(left_is_rare,  rrL, rsL)
-    rhoR_star = jnp.where(right_is_rare, rrR, rsR)
+    # Left rarefaction head/tail
+    SHL = uL - aL
+    a_starL = aL * (pstar / pL) ** ((gamma - 1.0) / (2.0 * gamma))
+    STL = ustar - a_starL
 
-    return u_star, rhoL_star, rhoR_star
+    # Left star density (post-wave)
+    beta = (gamma - 1.0) / (gamma + 1.0)
+    rho_sh = rhoL * ((pstar / pL + beta) / (beta * pstar / pL + 1.0))
+    rho_ra = rhoL * (pstar / pL) ** (1.0 / gamma)
+    rho_star = jnp.where(is_shock, rho_sh, rho_ra)
+    UL_star = _U_from_rho_u_p(rho_star, ustar, pstar, gamma)
 
-def _wave_speeds(p_star, u_star, rhoL, uL, pL, rhoR, uR, pR, gamma):
-    aL = jnp.sqrt(gamma * pL / rhoL)
-    aR = jnp.sqrt(gamma * pR / rhoR)
+    # Left state
+    UL_L = _U_from_rho_u_p(rhoL, uL, pL, gamma)
 
-    left_is_rare  = p_star <= pL
-    right_is_rare = p_star <= pR
+    # Fan state at ξ=0 (safe eval with clips)
+    # Toro rarefaction self-similar relations evaluated at xi=0
+    # These expressions are only USED when inside the fan; safe to clip bases.
+    u_fan = (2.0 / (gamma + 1.0)) * (aL + 0.5 * (gamma - 1.0) * uL)
+    a_fan = (2.0 / (gamma + 1.0)) * (aL + 0.5 * (gamma - 1.0) * (uL - 0.0))
+    a_fan = jnp.clip(a_fan, 1e-16)
+    rho_fan = rhoL * (a_fan / jnp.clip(aL, 1e-16)) ** (2.0 / (gamma - 1.0))
+    p_fan = pL * (a_fan / jnp.clip(aL, 1e-16)) ** (2.0 * gamma / (gamma - 1.0))
+    UL_fan = _U_from_rho_u_p(rho_fan, u_fan, p_fan, gamma)
 
-    # left
-    # rarefaction: head uL - aL, tail u* - aL*
-    aL_star = jnp.sqrt(gamma * p_star / (rhoL * ((p_star/pL) ** (1.0/gamma))))  # uses rhoL*
-    # but we don’t have rhoL* here—compute directly:
-    rhoL_star_rare = rhoL * (p_star / pL) ** (1.0 / gamma)
-    aL_star = jnp.sqrt(gamma * p_star / rhoL_star_rare)
-    SL_head = uL - aL
-    SL_tail = u_star - aL_star
+    # Assemble by regions with jnp.where
+    # Shock case: if 0 <= SL => region 1 (left), else region 2* (star)
+    UL_if_shock = jnp.where(0.0 <= SL, UL_L, UL_star)
 
-    # shock: sL = uL - sqrt(AL (p* + BL))
-    AL = 2.0 / ((gamma + 1.0) * rhoL)
-    BL = (gamma - 1.0) / (gamma + 1.0) * pL
-    SL_shock = uL - jnp.sqrt(AL * jnp.maximum(p_star + BL, EPS))
+    # Rarefaction case:
+    #  - if 0 <= SHL -> left state
+    #  - elif 0 >= STL -> star state
+    #  - else -> fan state
+    UL_if_rare = jnp.where(0.0 <= SHL, UL_L, jnp.where(0.0 >= STL, UL_star, UL_fan))
 
-    S_L = jnp.where(left_is_rare, SL_head, SL_shock)
-    S_L_tail = jnp.where(left_is_rare, SL_tail, jnp.nan)  # nan indicates no tail
+    UL_if = jnp.where(is_shock, UL_if_shock, UL_if_rare)
+    return UL_if
 
-    # right
-    rhoR_star_rare = rhoR * (p_star / pR) ** (1.0 / gamma)
-    aR_star = jnp.sqrt(gamma * p_star / rhoR_star_rare)
-    SR_head = uR + aR
-    SR_tail = u_star + aR_star
 
-    AR = 2.0 / ((gamma + 1.0) * rhoR)
-    BR = (gamma - 1.0) / (gamma + 1.0) * pR
-    SR_shock = uR + jnp.sqrt(AR * jnp.maximum(p_star + BR, EPS))
+def _right_at_interface(pstar, ustar, rhoR, uR, pR, aR, gamma: float):
+    is_shock = pstar > pR
 
-    S_R = jnp.where(right_is_rare, SR_head, SR_shock)
-    S_R_tail = jnp.where(right_is_rare, SR_tail, jnp.nan)
+    # Right shock speed S_R
+    SR = uR + aR * jnp.sqrt(
+        0.5 * (gamma + 1.0) / gamma * (pstar / pR) + 0.5 * (gamma - 1.0) / gamma
+    )
 
-    return S_L, S_L_tail, u_star, S_R_tail, S_R
+    # Right rarefaction head/tail
+    SHR = uR + aR
+    a_starR = aR * (pstar / pR) ** ((gamma - 1.0) / (2.0 * gamma))
+    STR = ustar + a_starR
 
-# --- Exact Riemann flux at ξ = 0 -------------------------------------------
+    # Right star density
+    beta = (gamma - 1.0) / (gamma + 1.0)
+    rho_sh = rhoR * ((pstar / pR + beta) / (beta * pstar / pR + 1.0))
+    rho_ra = rhoR * (pstar / pR) ** (1.0 / gamma)
+    rho_star = jnp.where(is_shock, rho_sh, rho_ra)
+    UR_star = _U_from_rho_u_p(rho_star, ustar, pstar, gamma)
 
-def exact_riemann(U_l, U_r, gamma):
+    # Right state
+    UR_R = _U_from_rho_u_p(rhoR, uR, pR, gamma)
+
+    # Fan state at ξ=0 (safe eval with clips)
+    u_fan = (2.0 / (gamma + 1.0)) * (-aR + 0.5 * (gamma - 1.0) * uR)
+    a_fan = (2.0 / (gamma + 1.0)) * (-aR + 0.5 * (gamma - 1.0) * (0.0 - uR))
+    a_fan = jnp.clip(a_fan, 1e-16)
+    rho_fan = rhoR * (a_fan / jnp.clip(aR, 1e-16)) ** (2.0 / (gamma - 1.0))
+    p_fan = pR * (a_fan / jnp.clip(aR, 1e-16)) ** (2.0 * gamma / (gamma - 1.0))
+    UR_fan = _U_from_rho_u_p(rho_fan, u_fan, p_fan, gamma)
+
+    # Assemble by regions
+    UR_if_shock = jnp.where(0.0 >= SR, UR_R, UR_star)
+    UR_if_rare = jnp.where(0.0 >= SHR, UR_R, jnp.where(0.0 <= STR, UR_star, UR_fan))
+    UR_if = jnp.where(is_shock, UR_if_shock, UR_if_rare)
+    return UR_if
+
+
+def exact_riemann(
+    U_l: Float[Array, "3 ..."],
+    U_r: Float[Array, "3 ..."],
+    gamma: float,
+) -> Float[Array, "3 ..."]:
     """
-    Vectorized exact Riemann solver for Euler ideal gas.
-    Inputs:
-      U_l, U_r : (3, N)
-    Returns:
-      F        : (3, N) numerical flux at interfaces
+    Exact Riemann solver for 1D Euler (Toro). Returns flux at each interface.
+    U_l, U_r: [3, N]
     """
-    # primitives
-    primL = physics.to_primitives(U_field=U_l, gamma=gamma)  # (rhoL, uL, pL)
-    primR = physics.to_primitives(U_field=U_r, gamma=gamma)  # (rhoR, uR, pR)
-    rhoL, uL, pL = primL[0, :], primL[1, :], primL[2, :]
-    rhoR, uR, pR = primR[0, :], primR[1, :], primR[2, :]
-    aL = jnp.sqrt(gamma * pL / rhoL)
-    aR = jnp.sqrt(gamma * pR / rhoR)
+    rhoL, uL, pL = _primitives_from_U(U_l, gamma)
+    rhoR, uR, pR = _primitives_from_U(U_r, gamma)
+    aL = _a_from_rho_p(rhoL, pL, gamma)
+    aR = _a_from_rho_p(rhoR, pR, gamma)
 
-    # optional vacuum guard: fall back to HLLC if vacuum criterion is violated
-    vac = _vacuum_flag(uL, aL, uR, aR, gamma)
+    pstar = _solve_pstar(rhoL, uL, pL, aL, rhoR, uR, pR, aR, gamma)
+    ustar = _ustar(pstar, rhoL, uL, pL, aL, rhoR, uR, pR, aR, gamma)
 
-    # p*, u*, rho* left/right
-    p_star = _solve_p_star(rhoL, uL, pL, aL, rhoR, uR, pR, aR, gamma)
-    u_star, rhoL_star, rhoR_star = _star_state(p_star, rhoL, uL, pL, rhoR, uR, pR, gamma)
+    UL_if = _left_at_interface(pstar, ustar, rhoL, uL, pL, aL, gamma)
+    UR_if = _right_at_interface(pstar, ustar, rhoR, uR, pR, aR, gamma)
 
-    # wave speeds
-    S_L, S_L_tail, S_M, S_R_tail, S_R = _wave_speeds(p_star, u_star, rhoL, uL, pL, rhoR, uR, pR, gamma)
-
-    # Sampling at xi = 0
-    left_is_rare  = p_star <= pL
-    right_is_rare = p_star <= pR
-
-    # left-side state when S_M >= 0 controls the interface
-    # left rarefaction cases:
-    #   if 0 <= S_L_head -> left state
-    #   elif 0 >= S_L_tail -> left star
-    #   else -> inside fan at xi=0
-    rhoL_fan = lambda aH, aT: None  # only name placeholder
-
-    # inside left fan at xi=0:
-    # u(0) = uL + 2/(γ+1) * (0 - (uL - aL)) = uL + 2 aL/(γ+1)
-    uL_in = uL + 2.0 * aL / (gamma + 1.0)
-    aL_in = aL - 0.5 * (gamma - 1.0) * (uL_in - uL)
-    # but the invariant formula is simpler via standard derivation:
-    # Use canonical formulas:
-    aL_in = jnp.maximum((2.0/(gamma+1.0))*(aL + 0.5*(gamma-1.0)*uL), EPS)  # safe
-    # Use the textbook fan relations directly:
-    # We prefer explicit fan formulas below to avoid ambiguity:
-    def left_fan_state():
-        u = uL + 2.0/(gamma+1.0) * (0.0 - (uL - aL))  # xi=0
-        a = aL - 0.5*(gamma-1.0)*(u - uL)
-        p = pL * (a / aL) ** (2.0 * gamma / (gamma - 1.0))
-        rho = rhoL * (a / aL) ** (2.0 / (gamma - 1.0))
-        return rho, u, p
-
-    def right_fan_state():
-        u = uR + 2.0/(gamma+1.0) * ((uR + aR) - 0.0)  # xi=0
-        a = aR - 0.5*(gamma-1.0)*(uR - u)
-        p = pR * (a / aR) ** (2.0 * gamma / (gamma - 1.0))
-        rho = rhoR * (a / aR) ** (2.0 / (gamma - 1.0))
-        return rho, u, p
-
-    rhoLf, uLf, pLf = left_fan_state()
-    rhoRf, uRf, pRf = right_fan_state()
-
-    # Compose candidate states:
-    # Left candidates (used if S_M >= 0)
-    # - left far state
-    rhoL_far, uL_far, pL_far = rhoL, uL, pL
-    # - left star
-    rhoL_st, uL_st, pL_st = rhoL_star, S_M, p_star
-    # - left fan-at-zero
-    rhoL_in, uL_in, pL_in = rhoLf, uLf, pLf
-
-    # Right candidates (used if S_M < 0)
-    rhoR_far, uR_far, pR_far = rhoR, uR, pR
-    rhoR_st, uR_st, pR_st = rhoR_star, S_M, p_star
-    rhoR_in, uR_in, pR_in = rhoRf, uRf, pRf
-
-    # Decide which side controls interface by sign of S_M
-    left_controls = S_M >= 0.0
-
-    # LEFT decision tree at xi=0:
-    # shock: if 0 <= S_L -> left far, else left star
-    # rare:  if 0 <= S_L_head -> left far
-    #        elif 0 >= S_L_tail -> left star
-    #        else -> fan state
-    SL_head = uL - aL  # used only when rare
-    use_left_far  = jnp.where(left_is_rare,  (0.0 <= SL_head), (0.0 <= S_L))
-    use_left_star = jnp.where(left_is_rare,  (0.0 >= S_L_tail), (0.0 >  S_L))
-    use_left_fan  = jnp.logical_and(left_is_rare, jnp.logical_not(jnp.logical_or(use_left_far, use_left_star)))
-
-    rhoL_pick = jnp.where(use_left_far,  rhoL_far,
-                   jnp.where(use_left_star, rhoL_st, rhoL_in))
-    uL_pick   = jnp.where(use_left_far,  uL_far,
-                   jnp.where(use_left_star, uL_st,   uL_in))
-    pL_pick   = jnp.where(use_left_far,  pL_far,
-                   jnp.where(use_left_star, pL_st,   pL_in))
-
-    # RIGHT decision tree at xi=0:
-    # shock: if 0 >= S_R -> right far, else right star
-    # rare:  if 0 >= S_R_head -> right far
-    #        elif 0 <= S_R_tail -> right star
-    #        else -> fan state
-    SR_head = uR + aR
-    use_right_far  = jnp.where(right_is_rare, (0.0 >= SR_head), (0.0 >= S_R))
-    use_right_star = jnp.where(right_is_rare, (0.0 <= S_R_tail), (0.0 <  S_R))
-    use_right_fan  = jnp.logical_and(right_is_rare, jnp.logical_not(jnp.logical_or(use_right_far, use_right_star)))
-
-    rhoR_pick = jnp.where(use_right_far,  rhoR_far,
-                   jnp.where(use_right_star, rhoR_st, rhoR_in))
-    uR_pick   = jnp.where(use_right_far,  uR_far,
-                   jnp.where(use_right_star, uR_st,   uR_in))
-    pR_pick   = jnp.where(use_right_far,  pR_far,
-                   jnp.where(use_right_star, pR_st,   pR_in))
-
-    # select side by S_M sign
-    rho_if = jnp.where(left_controls, rhoL_pick, rhoR_pick)
-    u_if   = jnp.where(left_controls, uL_pick,   uR_pick)
-    p_if   = jnp.where(left_controls, pL_pick,   pR_pick)
-
-    # build conservatives and flux
-    U_if = _cons_from_prim(rho_if, u_if, p_if, gamma)
-    F_exact = flux_function(U_if, gamma=gamma)
-
-    # Optional fallback to HLLC in vacuum-danger zones (keeps robustness)
-    if 'harten_lax_van_leer_contact' in globals():
-        F_hllc = harten_lax_van_leer_contact(U_l, U_r, gamma=gamma)
-        F_exact = jnp.where(vac[None, :], F_hllc, F_exact)
-
-    return F_exact
+    # Choose which side provides the interface state at ξ=0 by sign of u*
+    U_if = jnp.where(ustar[None, :] >= 0.0, UL_if, UR_if)
+    return flux_function(U_if, gamma)
