@@ -205,5 +205,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
-src/compressible_1d/run.ipynb
-experiments/
+
+experiments/*
+!experiments/example.py

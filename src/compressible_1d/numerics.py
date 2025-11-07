@@ -9,15 +9,28 @@ from compressible_1d import boundary_conditions, solver, diagnose, numerics
 @dataclass
 class Input:
     U_init: Float[Array, "3 n_cells"]
+    """Initial flow field. The solver expects conserved, normalized variables."""
     gamma: float
+    """Specific heat ratio."""
     boundary_condition: str
+    """Type of boundary condition at domain edges."""
     solver_type: str
+    """Type of solver to use. Currently available: 'lf', 'hllc', 'exact'."""
     delta_x: float
+    """Spatial step size."""
     delta_t: float
+    """Time step size."""
     n_steps: int
+    """Number of time steps to simulate."""
     n_ghost_cells: int
+    """Number of ghost cells on each side of the domain. Currently only 1 is supported."""
     is_debug: bool
+    """If True, print some diagnostics during simulation."""
     is_abort: bool
+    """If True, aborts the simulation if critical requirements are not met.
+    
+    For details, check `diagnose.check_all()`.
+    """
 
 
 def step(
@@ -29,6 +42,7 @@ def step(
     boundary_condition_type: str,
     solver_type: str,
 ) -> Float[Array, "3 n_cells"]:
+    """Perform a single time step update of the flow field."""
     U_field_with_ghosts: Float[Array, "3 n_cells+2*n_ghost_cells"] = (
         boundary_conditions.apply_boundary_condition(
             U_field,
@@ -58,6 +72,7 @@ def step(
 
 
 def run(input: Input):
+    """Run the CFD simulation based on the provided input parameters."""
     U_field = input.U_init
 
     step = jax.jit(
@@ -100,6 +115,8 @@ def run(input: Input):
 def calculate_dt(
     U: Float[Array, "3 N"], gamma: float, delta_x: float, cmax: float = 1.0
 ) -> float:
+    """Calculate time step width according to CFL condition."""
+
     def a(U: Float[Array, "3 N"], gamma: float):
         return jnp.sqrt(gamma * U[2, :] / U[0, :])
 

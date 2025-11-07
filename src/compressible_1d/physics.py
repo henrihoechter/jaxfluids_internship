@@ -43,6 +43,22 @@ def to_conserved(
 
 
 def to_primitives(U_field: Float[Array, "3 N"], gamma: float) -> Float[Array, "3 N"]:
+    """Converts a normalized, conserved state vector to a primitive state vector.
+
+    primitive:
+    U[0]: mass density rho
+    U[1]: velocity u
+    U[2]: pressure p
+
+    conserved:
+    U[0]: normalized mass density
+    U[1]: normalized momentum density
+    U[2]: normalized energy density
+
+    This function does not scale the variables back to physical units, but leaves them
+    normalized.
+    """
+
     rho_norm = U_field[0, :]
     rhoU_norm = U_field[1, :]
     rhoE_norm = U_field[2, :]

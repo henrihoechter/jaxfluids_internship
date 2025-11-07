@@ -15,10 +15,10 @@ def check_conservation(U, U_ref, debug: bool = False, abort: bool = True) -> Non
             f"Energy: \tU={jnp.sum(U[2, :]):2.5e}, \tU_ref={jnp.sum(U_ref[2, :]):2.5e}, \tdiff (abs)={jnp.sum(U[2, :]) - jnp.sum(U_ref[2, :]):2.5e}"
         )
 
-    total_u = jnp.sum(U, axis=1)
-    total_uref = jnp.sum(U_ref, axis=1)
+    total_U = jnp.sum(U, axis=1)
+    total_Uref = jnp.sum(U_ref, axis=1)
 
-    if abort and not jnp.allclose(total_u, total_uref, atol=ATOL):
+    if abort and not jnp.allclose(total_U, total_Uref, atol=ATOL):
         raise ValueError("U is not conserved.")
 
     return None
