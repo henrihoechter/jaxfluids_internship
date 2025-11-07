@@ -9,4 +9,10 @@ chmod +x ./docker/entrypoint.sh
 ./docker/entrypoint.sh
 ```
 
+## Example
+
+Run 
+```
+python3 ./experiments/example.py
+```
 
