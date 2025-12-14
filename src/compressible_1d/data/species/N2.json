@@ -1,0 +1,29 @@
+{
+  "name": "N2",
+  "molecular_mass": 0.028014,
+  "formation_enthalpy": 0.0,
+  "theta_v": 3395.0,
+  "theta_rot": 2.9,
+  "theta_d": 113500.0,
+  "collision_diameter": 3.798e-10,
+  "nasa_low": [
+    3.298677,
+    0.0014082404,
+    -3.963222e-06,
+    5.641515e-09,
+    -2.444854e-12,
+    -1020.8999,
+    3.950372
+  ],
+  "nasa_high": [
+    2.92664,
+    0.0014879768,
+    -5.68476e-07,
+    1.0097038e-10,
+    -6.753351e-15,
+    -922.7977,
+    5.980528
+  ],
+  "temp_mid": 1000.0,
+  "notes": "N2 thermodynamic data from NASA polynomials. theta_v = 3395K is the characteristic vibrational temperature. theta_d = 113500K is the dissociation temperature (D_0/k_B). Collision diameter from kinetic theory."
+}

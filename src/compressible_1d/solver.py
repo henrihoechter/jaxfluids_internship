@@ -342,3 +342,29 @@ def exact_riemann(
     # Choose which side provides the interface state at ξ=0 by sign of u*
     U_if = jnp.where(ustar[None, :] >= 0.0, UL_if, UR_if)
     return flux_function(U_if, gamma)
+
+
+def hllc_two_temperature(
+    U_l: Float[Array, "n_conserved ..."],
+    U_r: Float[Array, "n_conserved ..."],
+    species_list: list,
+    config,
+) -> Float[Array, "n_conserved ..."]:
+    """HLLC Riemann solver for two-temperature multi-species system.
+
+    Wrapper function that calls the solver implementation from solver_adapter.
+
+    Args:
+        U_l: Left state [n_conserved, ...]
+        U_r: Right state [n_conserved, ...]
+        species_list: List of species data
+        config: Two-temperature model configuration
+
+    Returns:
+        F: Numerical flux [n_conserved, ...]
+    """
+    from compressible_1d.two_temperature.solver_adapter import (
+        compute_flux_two_temperature,
+    )
+
+    return compute_flux_two_temperature(U_l, U_r, species_list, config)
