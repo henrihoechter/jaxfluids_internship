@@ -305,3 +305,16 @@ def run_two_temperature(
         U_field = new_U_field
 
     return U_solutions
+
+
+def slope_limiter_minmod(
+    delta_minus: Float[Array, "n_cells n_variables"],
+    delta_plus: Float[Array, "n_cells n_variables"],
+) -> Float[Array, "n_cells n_variables"]:
+    """Compute the minmod slope limiter."""
+    slope = jnp.where(
+        (delta_minus * delta_plus) > 0,
+        jnp.sign(delta_minus) * jnp.minimum(jnp.abs(delta_minus), jnp.abs(delta_plus)),
+        0.0,
+    )
+    return slope

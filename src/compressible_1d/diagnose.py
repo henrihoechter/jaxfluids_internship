@@ -1,6 +1,13 @@
 import jax.numpy as jnp
+import jaxtyping as jt
+from beartype import beartype
 
 ATOL = 1e-6
+
+
+def runtime_check_array_sizes(f):
+    """Decorator to enforce jaxtyping shape annotations at runtime."""
+    return jt.jaxtyped(typechecker=beartype)(f)
 
 
 def check_conservation(U, U_ref, debug: bool = False, abort: bool = True) -> None:

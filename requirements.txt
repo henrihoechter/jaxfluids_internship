@@ -12,3 +12,4 @@ ipykernel
 pydantic
 pydantic-settings
 nbformat
+beartype
