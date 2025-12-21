@@ -6,6 +6,6 @@ k = constants.Boltzmann  # [J/K]
 
 e = constants.e  # [C] elementary charge
 
-R_bar = constants.R  # [J/(mol K)] universal gas constant
+R_universal = constants.R  # [J/(mol K)] universal gas constant
 
 amu_to_g = constants.atomic_mass  # [g]

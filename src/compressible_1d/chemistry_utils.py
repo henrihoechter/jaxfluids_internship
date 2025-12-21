@@ -5,12 +5,12 @@ import jax.numpy as jnp
 from jaxtyping import Float, Array
 
 
-from compressible_1d.chemistry_types import Species
+from compressible_1d.chemistry_types import Species, SpeciesTable
 from compressible_1d import constants
 
 
 def load_species_from_gnoffo(
-    general_data_path: str, equilibrium_enthaply: str
+    general_data_path: str, equilibrium_enthalpy: str
 ) -> List[Species]:
     """
 
@@ -63,7 +63,7 @@ def load_species_from_gnoffo(
 
     for entry in raw_data:
         T_limit_low, T_limit_high, parameters = load_equilibrium_enthalpy_curve_fits(
-            json_path=equilibrium_enthaply, species_name=entry["name"]
+            json_path=equilibrium_enthalpy, species_name=entry["name"]
         )
         species = Species(
             name=entry["name"],
@@ -121,3 +121,22 @@ def load_equilibrium_enthalpy_curve_fits(
         raise ValueError(f"No curve fit data found for species {species_name}.")
 
     return T_limit_low, T_limit_high, parameters
+
+
+def load_species_table_from_gnoffo(
+    general_data_path: str, equilibrium_enthalpy: str
+) -> SpeciesTable:
+    """Load species data and return as SpeciesTable.
+
+    Convenience wrapper around load_species_from_gnoffo that returns
+    a vectorized SpeciesTable for efficient JAX operations.
+
+    Args:
+        general_data_path: Path to JSON file with general species data
+        equilibrium_enthalpy: Path to JSON file with enthalpy curve fits
+
+    Returns:
+        SpeciesTable with all data as vectorized arrays
+    """
+    species_list = load_species_from_gnoffo(general_data_path, equilibrium_enthalpy)
+    return SpeciesTable.from_species_list(species_list)
