@@ -109,6 +109,16 @@ class SpeciesTable:
     - Output: Enthalpy array [J/kg], shape (n_species, N)
     """
 
+    cp_equilibrium: Callable[[Float[Array, " N"]], Float[Array, "n_species N"]]
+    """Specific heat at constant pressure calculator.
+
+    Signature: cp_equilibrium(T) -> cp_all_species
+    - Input: Temperature array [K], shape (N,)
+    - Output: Specific heat [J/(kg·K)], shape (n_species, N)
+
+    Computed via differentiation of enthalpy polynomial: C_p = dh/dT
+    """
+
     def __post_init__(self):
         """Validate data consistency."""
         n_sp = len(self.names)
@@ -128,8 +138,9 @@ class SpeciesTable:
         # Check physical constraints
         assert jnp.all(self.molar_masses > 0), "All molar masses must be positive"
 
-        # Verify callable is present
+        # Verify callables are present
         assert callable(self.h_equilibrium), "h_equilibrium must be callable"
+        assert callable(self.cp_equilibrium), "cp_equilibrium must be callable"
 
     @property
     def n_species(self) -> int:
@@ -259,6 +270,16 @@ class SpeciesTable:
             molar_masses=molar_masses,
         )
 
+        # Create specific heat (C_p) callable using SAME polynomial data
+        # C_p is computed via differentiation: C_p = dh/dT
+        cp_equilibrium = partial(
+            thermodynamic_relations.compute_cp_from_polynomial,
+            T_limit_low=T_limit_low,
+            T_limit_high=T_limit_high,
+            parameters=parameters,  # Same coefficients as h_equilibrium!
+            molar_masses=molar_masses,
+        )
+
         return cls(
             names=names,
             molar_masses=molar_masses,
@@ -267,6 +288,7 @@ class SpeciesTable:
             ionization_energy=ionization_energy,
             vibrational_relaxation_factor=vibrational_relaxation_factor,
             h_equilibrium=h_equilibrium,
+            cp_equilibrium=cp_equilibrium,
         )
 
 
