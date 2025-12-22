@@ -33,7 +33,7 @@ def extract_primitives_from_U(
         Tv: Vibrational temperature [K]
         p: Pressure [Pa]
     """
-    n_species = equation_manager.species.n_species()
+    n_species = equation_manager.species.n_species
 
     # Extract partial densities
     rho_s = U[:, :n_species]  # [n_cells, n_species]
@@ -66,7 +66,7 @@ def extract_primitives_from_U(
 
     # Solve for T_V using Newton-Raphson
     T_V_initial = jnp.full_like(rho, 298.16)  # [K]
-    T_V = thermodynamic_relations.solve_vibrational_temperature_from_vibrational_energy(
+    T_V = thermodynamic_relations.solve_vibrational_temperature_from_v  ibrational_energy(
         e_V_target=E_v,
         c_s=c_s.T,
         T_V_initial=T_V_initial,

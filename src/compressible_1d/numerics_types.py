@@ -9,6 +9,7 @@ class ClippingConfig:
     Always instantiated to avoid runtime checks. Set min=-inf and max=inf
     to effectively disable clipping for specific variables.
     """
+
     # Primitive variables
     rho_min: float = 1e-10
     rho_max: float = 1e10
@@ -32,6 +33,7 @@ class ClippingConfig:
     rho_Ev_max: float = 1e12
 
 
+@dataclass(frozen=True, slots=True)
 class NumericsConfig:
     dt: float
     dx: float

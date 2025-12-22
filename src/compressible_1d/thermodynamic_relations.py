@@ -59,13 +59,17 @@ def compute_equilibrium_enthalpy_polynomial(
             a = params[i, :]
 
             # Evaluate polynomial: h = (R/M) * (a0*T + a1*T^2/2 + ... + a5)
-            h_range = constants.R_universal / (M / 1e3) * (
-                a[0] * T_V**1 / 1
-                + a[1] * T_V**2 / 2
-                + a[2] * T_V**3 / 3
-                + a[3] * T_V**4 / 4
-                + a[4] * T_V**5 / 5
-                + a[5]
+            h_range = (
+                constants.R_universal
+                / (M / 1e3)
+                * (
+                    a[0] * T_V**1 / 1
+                    + a[1] * T_V**2 / 2
+                    + a[2] * T_V**3 / 3
+                    + a[3] * T_V**4 / 4
+                    + a[4] * T_V**5 / 5
+                    + a[5]
+                )
             )
 
             # Update h_V only where mask is True
@@ -125,8 +129,10 @@ def compute_cp_from_polynomial(
             a = params[i, :]
 
             # C_p = dh/dT = (R/M) * (a0 + a1*T + a2*T^2 + a3*T^3 + a4*T^4)
-            cp_range = constants.R_universal / (M / 1e3) * (
-                a[0] + a[1] * T + a[2] * T**2 + a[3] * T**3 + a[4] * T**4
+            cp_range = (
+                constants.R_universal
+                / (M / 1e3)
+                * (a[0] + a[1] * T + a[2] * T**2 + a[3] * T**3 + a[4] * T**4)
             )
 
             cp = jnp.where(mask, cp_range, cp)
@@ -165,13 +171,13 @@ def compute_cv_trans_rot(
         - Combined: C_v,tr = (5/2) R/M (molecules), (3/2) R/M (atoms)
     """
     R = constants.R_universal  # J/(mol·K)
-    M = molar_masses / 1e3     # Convert kg/kmol -> kg/mol
+    M = molar_masses / 1e3  # Convert kg/kmol -> kg/mol
 
     # Compute C_v,tr per species (Gnoffo 1989, eq. 24, 25)
     cv_tr_species = jnp.where(
         ~is_monoatomic,
         2.5 * R / M,  # Diatomic: (5/2) R/M
-        1.5 * R / M   # Atom: (3/2) R/M
+        1.5 * R / M,  # Atom: (3/2) R/M
     )  # Shape: (n_species,)
 
     # Broadcast to (n_species, N) - constant across temperature
@@ -219,7 +225,7 @@ def compute_cv_vib_electronic(
     # Compute C_v = C_p - R/M (eq. 30)
     R = constants.R_universal
     M = molar_masses / 1e3  # kg/kmol -> kg/mol
-    R_over_M = R / M        # Shape: (n_species,)
+    R_over_M = R / M  # Shape: (n_species,)
 
     cv = cp - R_over_M[:, None]  # Broadcast to (n_species, N)
 
@@ -300,10 +306,10 @@ def compute_e_vib_electronic(
             # Compute C_{v,V} polynomial coefficients
             R_over_M = R / M_kg_mol
             b_0 = R_over_M * (a[0] - 1) - cv_tr_s  # Constant term
-            b_1 = R_over_M * a[1]                  # Linear term
-            b_2 = R_over_M * a[2]                  # Quadratic term
-            b_3 = R_over_M * a[3]                  # Cubic term
-            b_4 = R_over_M * a[4]                  # Quartic term
+            b_1 = R_over_M * a[1]  # Linear term
+            b_2 = R_over_M * a[2]  # Quadratic term
+            b_3 = R_over_M * a[3]  # Cubic term
+            b_4 = R_over_M * a[4]  # Quartic term
 
             # Integrate: ∫C_{v,V} dT = b_0*T + b_1*T^2/2 + b_2*T^3/3 + b_3*T^4/4 + b_4*T^5/5
             def integrate_cv(T):
@@ -323,17 +329,10 @@ def compute_e_vib_electronic(
         return e_v
 
     # Vectorize over species
-    e_v_vectorized = jax.vmap(
-        e_v_single_species,
-        in_axes=(0, 0, 0, 0, 0)
-    )
+    e_v_vectorized = jax.vmap(e_v_single_species, in_axes=(0, 0, 0, 0, 0))
 
     return e_v_vectorized(
-        T_limit_low,
-        T_limit_high,
-        parameters,
-        is_monoatomic,
-        molar_masses
+        T_limit_low, T_limit_high, parameters, is_monoatomic, molar_masses
     )
 
 
@@ -446,16 +445,46 @@ def solve_vibrational_temperature_from_vibrational_energy(
         # Residual
         return e_V_computed - e_V_flat
 
+    # Create a scalar residual function for each cell
+    def scalar_residual_fn(T_V_scalar, e_V_target_scalar, c_s_col):
+        """Residual for a single cell: f(T_V) = Σ c_s e_{v,s}(T_V) - e_V_target"""
+        # Compute e_v for all species at this T_V
+        e_v_species = e_vib_electronic_callable(
+            jnp.array([T_V_scalar])
+        )  # (n_species, 1)
+
+        # Compute mixture vibrational energy
+        e_V_computed = jnp.sum(c_s_col * e_v_species[:, 0])
+
+        # Residual
+        return e_V_computed - e_V_target_scalar
+
+    # Vectorize the scalar Newton iteration across all cells
+    def compute_residual_and_jacobian(T_V_scalar, e_V_target_scalar, c_s_col):
+        """Compute residual and its derivative for a single cell."""
+        res_and_grad = jax.value_and_grad(
+            lambda t: scalar_residual_fn(t, e_V_target_scalar, c_s_col)
+        )
+        return res_and_grad(T_V_scalar)
+
+    # Vectorize over all cells
+    vectorized_compute = jax.vmap(compute_residual_and_jacobian, in_axes=(0, 0, 1))
+
     # Newton-Raphson iteration
     for _ in range(max_iterations):
-        # Compute residual and Jacobian using autodiff
-        residual, jacobian = jax.value_and_grad(residual_fn)(T_V_flat)
+        # Compute residual and Jacobian for all cells
+        residual, jacobian_diag = vectorized_compute(T_V_flat, e_V_flat, c_s_flat)
 
         # Newton update: ΔT_V = -f / (df/dT_V)
-        delta_T_V = -residual / jnp.clip(jacobian, 1e-20, None)
+        delta_T_V_full = -residual / jnp.clip(jacobian_diag, 1e-20, None)
 
-        # Update temperature
-        T_V_new = T_V_flat + delta_T_V
+        # Apply damping to prevent overshooting (limit step to 0.5 * T_V)
+        # This helps convergence when far from solution
+        max_step = 0.5 * jnp.abs(T_V_flat)
+        delta_T_V = jnp.clip(delta_T_V_full, -max_step, max_step)
+
+        # Update temperature (ensure positive)
+        T_V_new = jnp.maximum(T_V_flat + delta_T_V, 50.0)  # Min temperature 50K
 
         # Check convergence
         abs_error = jnp.abs(delta_T_V)

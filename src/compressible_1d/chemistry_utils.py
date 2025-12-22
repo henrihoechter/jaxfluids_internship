@@ -42,12 +42,27 @@ def load_species_from_gnoffo(
     """
 
     def _load_molar_mass(entry: dict) -> float:
-        """Convert molar mass from amu to g."""
-        return entry["molar_mass"] * 1e3  # g/mol -> kg/mol
+        """Convert molar mass from amu to kg/kmol.
+
+        Note: 1 amu = 1 g/mol = 1 kg/kmol (numerically identical)
+        """
+        return entry["molar_mass"]  # amu -> kg/kmol (no conversion needed)
 
     def _load_h_s0(entry: dict) -> float:
-        """Convert h_s0 from J/g/mol to J/kg."""
-        return entry["h_s0"] / (entry["molar_mass"] * 1e3)  # J/g/mol -> J/kg
+        """Convert h_s0 from kcal/mol to J/kg.
+
+        The JSON contains h_s0 in kcal/g-mole (kcal/mol).
+        Conversion: kcal/mol → J/kg
+          1. kcal → J: multiply by 4184 J/kcal
+          2. /mol → /kg: divide by molar_mass [kg/mol]
+        """
+        kcal_per_mol = entry["h_s0"]
+        J_per_mol = kcal_per_mol * 4184.0  # kcal/mol → J/mol
+        M_kg_per_mol = (
+            entry["molar_mass"] / 1000.0
+        )  # g/mol → kg/mol (molar_mass is in amu = g/mol)
+        J_per_kg = J_per_mol / M_kg_per_mol
+        return J_per_kg
 
     def _load_dissociation_energy(entry: dict) -> float | None:
         """Convert dissociation energy from eV to J."""
@@ -75,11 +90,6 @@ def load_species_from_gnoffo(
             json_path=equilibrium_enthalpy, species_name=entry["name"]
         )
 
-        # Extract characteristic temperatures (NEW)
-        # Default 0.0 for atoms (no vibrational or rotational modes)
-        theta_v = entry.get("theta_v", 0.0)
-        theta_rot = entry.get("theta_rot", 0.0)
-
         species = Species(
             name=entry["name"],
             molar_mass=_load_molar_mass(entry),
@@ -90,9 +100,6 @@ def load_species_from_gnoffo(
             dissociation_energy=_load_dissociation_energy(entry),
             ionization_energy=_load_ionization_energy(entry),
             vibrational_relaxation_factor=entry.get("vibrational_relaxation_factor"),
-            # NEW FIELDS
-            theta_v=theta_v,
-            theta_rot=theta_rot,
         )
         species_list.append(species)
 

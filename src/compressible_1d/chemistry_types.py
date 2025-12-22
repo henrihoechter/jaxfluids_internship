@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Callable
 
-import jax
 import jax.numpy as jnp
 import jaxtyping as jt
 from jaxtyping import Float, Array
@@ -151,25 +150,22 @@ class SpeciesTable:
         n_sp = len(self.names)
 
         # Check shape consistency
-        assert self.molar_masses.shape == (n_sp,), \
-            f"molar_masses shape {self.molar_masses.shape} != ({n_sp},)"
-        assert self.h_s0.shape == (n_sp,), \
-            f"h_s0 shape {self.h_s0.shape} != ({n_sp},)"
-        assert self.dissociation_energy.shape == (n_sp,), \
-            f"dissociation_energy shape {self.dissociation_energy.shape} != ({n_sp},)"
-        assert self.ionization_energy.shape == (n_sp,), \
-            f"ionization_energy shape {self.ionization_energy.shape} != ({n_sp},)"
-        assert self.vibrational_relaxation_factor.shape == (n_sp,), \
-            f"vibrational_relaxation_factor shape {self.vibrational_relaxation_factor.shape} != ({n_sp},)"
-        assert self.theta_v.shape == (n_sp,), \
-            f"theta_v shape {self.theta_v.shape} != ({n_sp},)"
-        assert self.theta_rot.shape == (n_sp,), \
-            f"theta_rot shape {self.theta_rot.shape} != ({n_sp},)"
+        assert self.molar_masses.shape == (
+            n_sp,
+        ), f"molar_masses shape {self.molar_masses.shape} != ({n_sp},)"
+        assert self.h_s0.shape == (n_sp,), f"h_s0 shape {self.h_s0.shape} != ({n_sp},)"
+        assert self.dissociation_energy.shape == (
+            n_sp,
+        ), f"dissociation_energy shape {self.dissociation_energy.shape} != ({n_sp},)"
+        assert self.ionization_energy.shape == (
+            n_sp,
+        ), f"ionization_energy shape {self.ionization_energy.shape} != ({n_sp},)"
+        assert (
+            self.vibrational_relaxation_factor.shape == (n_sp,)
+        ), f"vibrational_relaxation_factor shape {self.vibrational_relaxation_factor.shape} != ({n_sp},)"
 
         # Check physical constraints
         assert jnp.all(self.molar_masses > 0), "All molar masses must be positive"
-        assert jnp.all(self.theta_v >= 0), "All theta_v must be non-negative"
-        assert jnp.all(self.theta_rot >= 0), "All theta_rot must be non-negative"
 
         # Verify callables are present
         assert callable(self.h_equilibrium), "h_equilibrium must be callable"
@@ -203,19 +199,19 @@ class SpeciesTable:
         """Boolean mask indicating which species have vibrational modes."""
         return jnp.isfinite(self.vibrational_relaxation_factor)
 
-    # @property
-    # def is_monoatomic(self) -> Float[jt.Array, " n_species"]:
-    #     """Boolean mask indicating which species are monoatomic (atoms).
+    @property
+    def is_monoatomic(self) -> Float[jt.Array, " n_species"]:
+        """Boolean mask indicating which species are monoatomic (atoms).
 
-    #     Returns:
-    #         Boolean array where True = atom, False = molecule, shape (n_species,)
+        Returns:
+            Boolean array where True = atom, False = molecule, shape (n_species,)
 
-    #     Notes:
-    #         - Atoms have no dissociation energy (cannot dissociate further)
-    #         - Molecules have dissociation energy (can break into atoms)
-    #         - This is equivalent to theta_rot == 0 but more semantically clear
-    #     """
-    #     return ~self.has_dissociation_energy
+        Notes:
+            - Atoms have no dissociation energy (cannot dissociate further)
+            - Molecules have dissociation energy (can break into atoms)
+            - This is equivalent to theta_rot == 0 but more semantically clear
+        """
+        return ~self.has_dissociation_energy
 
     @property
     def electron_index(self) -> int | None:
@@ -292,27 +288,33 @@ class SpeciesTable:
         h_s0_array = jnp.array([s.h_s0 for s in species_list])
 
         # Vectorize optional properties (NaN for None)
-        dissociation_energy = jnp.array([
-            s.dissociation_energy if s.dissociation_energy is not None else jnp.nan
-            for s in species_list
-        ])
-        ionization_energy = jnp.array([
-            s.ionization_energy if s.ionization_energy is not None else jnp.nan
-            for s in species_list
-        ])
-        vibrational_relaxation_factor = jnp.array([
-            s.vibrational_relaxation_factor if s.vibrational_relaxation_factor is not None else jnp.nan
-            for s in species_list
-        ])
+        dissociation_energy = jnp.array(
+            [
+                s.dissociation_energy if s.dissociation_energy is not None else jnp.nan
+                for s in species_list
+            ]
+        )
+        ionization_energy = jnp.array(
+            [
+                s.ionization_energy if s.ionization_energy is not None else jnp.nan
+                for s in species_list
+            ]
+        )
+        vibrational_relaxation_factor = jnp.array(
+            [
+                (
+                    s.vibrational_relaxation_factor
+                    if s.vibrational_relaxation_factor is not None
+                    else jnp.nan
+                )
+                for s in species_list
+            ]
+        )
 
         # Stack temperature ranges and parameters for enthalpy calculation
         T_limit_low = jnp.stack([s.T_limit_low for s in species_list], axis=0)
         T_limit_high = jnp.stack([s.T_limit_high for s in species_list], axis=0)
         parameters = jnp.stack([s.parameters for s in species_list], axis=0)
-
-        # # Extract characteristic temperatures (NEW)
-        # theta_v_array = jnp.array([s.theta_v for s in species_list])
-        # theta_rot_array = jnp.array([s.theta_rot for s in species_list])
 
         is_monoatomic = ~jnp.isfinite(dissociation_energy)
 
