@@ -47,7 +47,7 @@ class Species:
     """
     vibrational_relaxation_factor: float | None = None
     """Vibrational relaxation factor, None for monoatomic species.
-    
+
     [-]
     """
 
@@ -119,6 +119,33 @@ class SpeciesTable:
     Computed via differentiation of enthalpy polynomial: C_p = dh/dT
     """
 
+    # Additional thermodynamic callables for two-temperature model
+    cv_trans_rot: Callable[[Float[Array, " N"]], Float[Array, "n_species N"]]
+    """Translational-rotational specific heat [J/(kg·K)].
+
+    Signature: cv_trans_rot(T) -> C_v,tr for all species
+    - For atoms: (3/2) R/M
+    - For diatomic molecules: (5/2) R/M
+    Based on ideal gas model (temperature-independent).
+    """
+
+    cv_vib_electronic: Callable[[Float[Array, " N"]], Float[Array, "n_species N"]]
+    """Vibrational-electronic specific heat [J/(kg·K)].
+
+    Signature: cv_vib_electronic(T_V) -> C_{v,V}^s for all species
+    Computed via eqs. 29-31: C_{v,V} = C_p(T_V) - R/M - C_{v,t} - C_{v,r}
+    Uses enthalpy polynomial differentiation (dh/dT) for C_p.
+    """
+
+    e_vib_electronic: Callable[[Float[Array, " N"]], Float[Array, "n_species N"]]
+    """Vibrational-electronic internal energy [J/kg].
+
+    Signature: e_vib_electronic(T_V) -> e_{v,s}(T_V) for all species
+    Computed via eq. 98: e_v = ∫_{T_ref}^{T_V} C_{v,V}(T') dT'
+    Using analytical polynomial integration.
+    T_ref is pre-evaluated via functools.partial (not stored in SpeciesTable).
+    """
+
     def __post_init__(self):
         """Validate data consistency."""
         n_sp = len(self.names)
@@ -134,13 +161,22 @@ class SpeciesTable:
             f"ionization_energy shape {self.ionization_energy.shape} != ({n_sp},)"
         assert self.vibrational_relaxation_factor.shape == (n_sp,), \
             f"vibrational_relaxation_factor shape {self.vibrational_relaxation_factor.shape} != ({n_sp},)"
+        assert self.theta_v.shape == (n_sp,), \
+            f"theta_v shape {self.theta_v.shape} != ({n_sp},)"
+        assert self.theta_rot.shape == (n_sp,), \
+            f"theta_rot shape {self.theta_rot.shape} != ({n_sp},)"
 
         # Check physical constraints
         assert jnp.all(self.molar_masses > 0), "All molar masses must be positive"
+        assert jnp.all(self.theta_v >= 0), "All theta_v must be non-negative"
+        assert jnp.all(self.theta_rot >= 0), "All theta_rot must be non-negative"
 
         # Verify callables are present
         assert callable(self.h_equilibrium), "h_equilibrium must be callable"
         assert callable(self.cp_equilibrium), "cp_equilibrium must be callable"
+        assert callable(self.cv_trans_rot), "cv_trans_rot must be callable"
+        assert callable(self.cv_vib_electronic), "cv_vib_electronic must be callable"
+        assert callable(self.e_vib_electronic), "e_vib_electronic must be callable"
 
     @property
     def n_species(self) -> int:
@@ -166,6 +202,20 @@ class SpeciesTable:
     def has_vibrational_mode(self) -> Float[jt.Array, " n_species"]:
         """Boolean mask indicating which species have vibrational modes."""
         return jnp.isfinite(self.vibrational_relaxation_factor)
+
+    # @property
+    # def is_monoatomic(self) -> Float[jt.Array, " n_species"]:
+    #     """Boolean mask indicating which species are monoatomic (atoms).
+
+    #     Returns:
+    #         Boolean array where True = atom, False = molecule, shape (n_species,)
+
+    #     Notes:
+    #         - Atoms have no dissociation energy (cannot dissociate further)
+    #         - Molecules have dissociation energy (can break into atoms)
+    #         - This is equivalent to theta_rot == 0 but more semantically clear
+    #     """
+    #     return ~self.has_dissociation_energy
 
     @property
     def electron_index(self) -> int | None:
@@ -260,6 +310,12 @@ class SpeciesTable:
         T_limit_high = jnp.stack([s.T_limit_high for s in species_list], axis=0)
         parameters = jnp.stack([s.parameters for s in species_list], axis=0)
 
+        # # Extract characteristic temperatures (NEW)
+        # theta_v_array = jnp.array([s.theta_v for s in species_list])
+        # theta_rot_array = jnp.array([s.theta_rot for s in species_list])
+
+        is_monoatomic = ~jnp.isfinite(dissociation_energy)
+
         # Create equilibrium enthalpy callable with functools.partial
         # This captures the curve fit data in the closure
         h_equilibrium = partial(
@@ -280,6 +336,37 @@ class SpeciesTable:
             molar_masses=molar_masses,
         )
 
+        # Create trans-rot specific heat callable (NEW)
+        cv_trans_rot = partial(
+            thermodynamic_relations.compute_cv_trans_rot,
+            is_monoatomic=is_monoatomic,
+            molar_masses=molar_masses,
+        )
+
+        # Create vib-electronic specific heat callable (NEW)
+        # Uses SAME polynomial data as h_equilibrium (just differentiated)
+        cv_vib_electronic = partial(
+            thermodynamic_relations.compute_cv_vib_electronic,
+            T_limit_low=T_limit_low,
+            T_limit_high=T_limit_high,
+            parameters=parameters,  # Same as enthalpy!
+            is_monoatomic=is_monoatomic,
+            molar_masses=molar_masses,
+        )
+
+        # Create vib-electronic internal energy callable (NEW)
+        # Uses SAME polynomial data, T_ref passed as parameter
+        T_ref = 298.16  # [K] - Pre-evaluated via functools.partial
+        e_vib_electronic = partial(
+            thermodynamic_relations.compute_e_vib_electronic,
+            T_ref=T_ref,
+            T_limit_low=T_limit_low,
+            T_limit_high=T_limit_high,
+            parameters=parameters,  # Same as enthalpy!
+            is_monoatomic=is_monoatomic,
+            molar_masses=molar_masses,
+        )
+
         return cls(
             names=names,
             molar_masses=molar_masses,
@@ -289,6 +376,9 @@ class SpeciesTable:
             vibrational_relaxation_factor=vibrational_relaxation_factor,
             h_equilibrium=h_equilibrium,
             cp_equilibrium=cp_equilibrium,
+            cv_trans_rot=cv_trans_rot,
+            cv_vib_electronic=cv_vib_electronic,
+            e_vib_electronic=e_vib_electronic,
         )
 
 

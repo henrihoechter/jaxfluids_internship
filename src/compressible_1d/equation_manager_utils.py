@@ -2,6 +2,8 @@ from jaxtyping import Array, Float
 import jax.numpy as jnp
 
 from compressible_1d import equation_manager_types
+from compressible_1d import constants
+from compressible_1d import thermodynamic_relations
 
 
 def extract_primitives_from_U(
@@ -54,48 +56,72 @@ def extract_primitives_from_U(
     # Total energy per unit mass
     E_total = rho_E / rho
 
-    
+    # Internal energy per unit mass (Gnoffo eq. 13)
+    e = E_total - E_kin
 
-    # Compute pressure
-    # M_mix = thermodynamics.compute_mixture_molecular_mass(Y, species_list)
-    # p = rho * (R / M_mix) * T
+    M_s = equation_manager.species.M_s
 
-    from compressible_1d import constants
+    # Mass fractions (Gnoffo eq. 88)
+    c_s = rho_s / rho[:, None]  # Shape: (n_cells, n_species)
 
-    M_s = equation_manager.species.M_s 
+    # Solve for T_V using Newton-Raphson
+    T_V_initial = jnp.full_like(rho, 298.16)  # [K]
+    T_V = thermodynamic_relations.solve_vibrational_temperature_from_vibrational_energy(
+        e_V_target=E_v,
+        c_s=c_s.T,
+        T_V_initial=T_V_initial,
+        e_vib_electronic_callable=equation_manager.species.e_vib_electronic,
+        max_iterations=20,
+        rtol=1e-6,
+        atol=1.0,
+    )  # Shape: (n_cells,)
 
-    # Mole fractions (Gnoffo 1989, Eq. 7)
-    Y_s = (rho_s / M_s[None, :]) / jnp.sum(rho_s / M_s[None, :], axis=-1, keepdims=True) 
+    # Solve for T using direct formula
+    # Compute cv_tr at a dummy temperature (it's constant for ideal gas)
+    T_dummy = jnp.ones(1)
+    cv_tr_all = equation_manager.species.cv_trans_rot(T_dummy)  # (n_species, 1)
+    cv_tr_broadcast = jnp.broadcast_to(
+        cv_tr_all[:, 0, None], (n_species, rho.shape[0])
+    )  # (n_species, n_cells)
 
-    # Calculate T_pressure according to Gnoffo 1989, Eq. 8, 9a and 9b
+    # Compute reference internal energies
+    e_s0 = thermodynamic_relations.compute_reference_internal_energy(
+        equation_manager.species.h_s0,
+        equation_manager.species.molar_masses,
+        T_ref=298.16,
+    )  # Shape: (n_species,)
+
+    T = thermodynamic_relations.solve_T_from_internal_energy(
+        e=e,
+        e_V=E_v,
+        c_s=c_s.T,
+        cv_tr=cv_tr_broadcast,
+        e_s0=e_s0,
+        T_ref=298.16,
+    )  # Shape: (n_cells,)
+
+    # Mole fractions (Gnoffo eq. 7)
+    Y_s = (rho_s / M_s[None, :]) / jnp.sum(rho_s / M_s[None, :], axis=-1, keepdims=True)
+
+    # Calculate T_pressure according to Gnoffo eq. 8, 9a, 9b
     # For heavy particles: T_pressure = T
     # For electrons: T_pressure = T_V
-    # TODO: T and Tv need to be computed first (currently commented out above)
-    # Placeholder until temperature calculations are implemented:
-    # T_pressure = jnp.broadcast_to(T[:, None], (rho_s.shape[0], n_species))  # Shape: (n_cells, n_species)
+    T_pressure = jnp.broadcast_to(T[:, None], (rho_s.shape[0], n_species))
 
-    # Set electron temperature to Tv if electrons are present
-    # electron_idx = equation_manager.species.electron_index
-    # if electron_idx is not None:
-    #     T_pressure = T_pressure.at[:, electron_idx].set(Tv)
+    electron_idx = equation_manager.species.electron_index
+    if electron_idx is not None:
+        T_pressure = T_pressure.at[:, electron_idx].set(T_V)
 
-    # Compute partial pressures (Gnoffo 1989, Eq. 8, 9a, 9b)
-    # p_s = rho_s * R / M_s * T_pressure
-    # Note: M_s is in kg/kmol, R_universal is in J/(mol*K), need factor of 1e3
-    # p_s = rho_s * constants.R_universal * 1e3 / M_s[None, :] * T_pressure
-    # p = jnp.sum(p_s, axis=-1)  # Shape: (n_cells,)
+    # Compute partial pressures and total pressure (Gnoffo eq. 8, 9a, 9b)
+    p_s = rho_s * constants.R_universal * 1e3 / M_s[None, :] * T_pressure
+    p = jnp.sum(p_s, axis=-1)
 
-    # Apply clipping to primitive variables (no if-check for performance)
-    # cfg = equation_manager.numerics_config.clipping
-    # rho = jnp.clip(rho, cfg.rho_min, cfg.rho_max)
-    # Y = jnp.clip(Y, cfg.Y_min, cfg.Y_max)
-    # T = jnp.clip(T, cfg.T_min, cfg.T_max)
-    # Tv = jnp.clip(Tv, cfg.Tv_min, cfg.Tv_max)
-    # p = jnp.clip(p, cfg.p_min, cfg.p_max)
+    # Apply clipping to primitive variables
+    clip_config = equation_manager.numerics_config.clipping
+    rho = jnp.clip(rho, clip_config.rho_min, clip_config.rho_max)
+    Y_s = jnp.clip(Y_s, clip_config.Y_min, clip_config.Y_max)
+    T = jnp.clip(T, clip_config.T_min, clip_config.T_max)
+    T_V = jnp.clip(T_V, clip_config.Tv_min, clip_config.Tv_max)
+    p = jnp.clip(p, clip_config.p_min, clip_config.p_max)
 
-    # TODO: Remove these placeholders once T, Tv, p calculations are implemented
-    T = jnp.zeros_like(rho)
-    Tv = jnp.zeros_like(rho)
-    p = jnp.zeros_like(rho)
-
-    return Y_s, rho, T, Tv, p
+    return Y_s, rho, T, T_V, p

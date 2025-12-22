@@ -12,13 +12,17 @@ from compressible_1d import constants
 def load_species_from_gnoffo(
     general_data_path: str, equilibrium_enthalpy: str
 ) -> List[Species]:
-    """
+    """Load species data including characteristic temperatures.
+
+    Extended to load:
+    - Enthalpy polynomial fits (existing)
+    - Characteristic temperatures theta_v, theta_rot (new - from general_data JSON)
 
     Format description `general_data_path`
     {
         "name": string,
-        "charge": float  # charge inelementary charge units
-        "molar_mass": float,  # relative atmoic mass in amu
+        "charge": float  # charge in elementary charge units
+        "molar_mass": float,  # relative atomic mass in amu
         "h_s0": float,  # standard enthalpy of formation at 0 K in J/g/mol
         "ionization_energy": float | None,  # ionization energy in eV, None for
             ionized species
@@ -26,10 +30,15 @@ def load_species_from_gnoffo(
             monoatomic species
         "vibrational_relaxation_factor": float | None  # vibrational relaxation factor,
             None for monoatomic species
+        "theta_v": float  # vibrational characteristic temperature [K], 0.0 for atoms
+        "theta_rot": float  # rotational characteristic temperature [K], 0.0 for atoms
     }
 
     Format description `equilibrium_enthaply`
 
+    Note:
+        - NO separate C_p curve fits needed!
+        - C_p computed via dh/dT from enthalpy polynomial
     """
 
     def _load_molar_mass(entry: dict) -> float:
@@ -65,6 +74,12 @@ def load_species_from_gnoffo(
         T_limit_low, T_limit_high, parameters = load_equilibrium_enthalpy_curve_fits(
             json_path=equilibrium_enthalpy, species_name=entry["name"]
         )
+
+        # Extract characteristic temperatures (NEW)
+        # Default 0.0 for atoms (no vibrational or rotational modes)
+        theta_v = entry.get("theta_v", 0.0)
+        theta_rot = entry.get("theta_rot", 0.0)
+
         species = Species(
             name=entry["name"],
             molar_mass=_load_molar_mass(entry),
@@ -75,6 +90,9 @@ def load_species_from_gnoffo(
             dissociation_energy=_load_dissociation_energy(entry),
             ionization_energy=_load_ionization_energy(entry),
             vibrational_relaxation_factor=entry.get("vibrational_relaxation_factor"),
+            # NEW FIELDS
+            theta_v=theta_v,
+            theta_rot=theta_rot,
         )
         species_list.append(species)
 
