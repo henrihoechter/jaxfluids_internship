@@ -1,12 +1,26 @@
 from dataclasses import dataclass
-from functools import partial
-from typing import Callable
 
 import jax.numpy as jnp
 import jaxtyping as jt
 from jaxtyping import Float, Array
 from compressible_1d import constants
-from compressible_1d import thermodynamic_relations
+
+
+def _compute_is_monoatomic(
+    dissociation_energy: Float[jt.Array, " n_species"],
+) -> Float[jt.Array, " n_species"]:
+    """Compute boolean mask indicating which species are monoatomic (atoms).
+
+    This is a local helper to avoid circular imports. The canonical version
+    is in equation_manager_utils.compute_is_monoatomic().
+
+    Args:
+        dissociation_energy: Dissociation energy array [J], NaN for atoms
+
+    Returns:
+        Boolean array where True = atom (monoatomic), False = molecule
+    """
+    return ~jnp.isfinite(dissociation_energy)
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,8 +99,10 @@ class SpeciesTable:
     """Vectorized species data structure for JAX processing.
 
     All data is stored as JAX arrays for efficient vectorized operations.
-    Thermodynamic properties are computed via callables (created with functools.partial)
-    to allow flexible, JAX-compatible calculation models.
+    Thermodynamic properties are computed via pure functions in thermodynamic_relations.py
+    that take this SpeciesTable as an argument.
+
+    This design makes SpeciesTable JIT-compatible (no callables/closures).
     """
 
     # Basic properties [n_species]
@@ -99,57 +115,22 @@ class SpeciesTable:
     ionization_energy: Float[jt.Array, " n_species"]  # [J]
     vibrational_relaxation_factor: Float[jt.Array, " n_species"]  # [-]
 
-    # Thermodynamic property callables - ONE per property for all species
-    h_equilibrium: Callable[[Float[Array, " N"]], Float[Array, "n_species N"]]
-    """Equilibrium enthalpy calculator.
+    # Polynomial coefficient data for thermodynamic calculations
+    T_limit_low: Float[jt.Array, "n_species n_ranges"]  # [K]
+    T_limit_high: Float[jt.Array, "n_species n_ranges"]  # [K]
+    enthalpy_coeffs: Float[jt.Array, "n_species n_ranges n_coeffs"]  # NASA coeffs
 
-    Signature: h_equilibrium(T_V) -> h_all_species
-    - Input: Temperature array [K], shape (N,)
-    - Output: Enthalpy array [J/kg], shape (n_species, N)
-    """
+    # Derived properties
+    is_monoatomic: Float[jt.Array, " n_species"]  # Boolean: True = atom, False = molecule
 
-    cp_equilibrium: Callable[[Float[Array, " N"]], Float[Array, "n_species N"]]
-    """Specific heat at constant pressure calculator.
-
-    Signature: cp_equilibrium(T) -> cp_all_species
-    - Input: Temperature array [K], shape (N,)
-    - Output: Specific heat [J/(kg·K)], shape (n_species, N)
-
-    Computed via differentiation of enthalpy polynomial: C_p = dh/dT
-    """
-
-    # Additional thermodynamic callables for two-temperature model
-    cv_trans_rot: Callable[[Float[Array, " N"]], Float[Array, "n_species N"]]
-    """Translational-rotational specific heat [J/(kg·K)].
-
-    Signature: cv_trans_rot(T) -> C_v,tr for all species
-    - For atoms: (3/2) R/M
-    - For diatomic molecules: (5/2) R/M
-    Based on ideal gas model (temperature-independent).
-    """
-
-    cv_vib_electronic: Callable[[Float[Array, " N"]], Float[Array, "n_species N"]]
-    """Vibrational-electronic specific heat [J/(kg·K)].
-
-    Signature: cv_vib_electronic(T_V) -> C_{v,V}^s for all species
-    Computed via eqs. 29-31: C_{v,V} = C_p(T_V) - R/M - C_{v,t} - C_{v,r}
-    Uses enthalpy polynomial differentiation (dh/dT) for C_p.
-    """
-
-    e_vib_electronic: Callable[[Float[Array, " N"]], Float[Array, "n_species N"]]
-    """Vibrational-electronic internal energy [J/kg].
-
-    Signature: e_vib_electronic(T_V) -> e_{v,s}(T_V) for all species
-    Computed via eq. 98: e_v = ∫_{T_ref}^{T_V} C_{v,V}(T') dT'
-    Using analytical polynomial integration.
-    T_ref is pre-evaluated via functools.partial (not stored in SpeciesTable).
-    """
+    # Reference temperature for vibrational energy integration
+    T_ref: float  # [K], typically 298.16
 
     def __post_init__(self):
         """Validate data consistency."""
         n_sp = len(self.names)
 
-        # Check shape consistency
+        # Check shape consistency for basic properties
         assert self.molar_masses.shape == (
             n_sp,
         ), f"molar_masses shape {self.molar_masses.shape} != ({n_sp},)"
@@ -164,15 +145,23 @@ class SpeciesTable:
             self.vibrational_relaxation_factor.shape == (n_sp,)
         ), f"vibrational_relaxation_factor shape {self.vibrational_relaxation_factor.shape} != ({n_sp},)"
 
+        # Check shape consistency for coefficient arrays
+        assert self.T_limit_low.shape[0] == n_sp, (
+            f"T_limit_low first dim {self.T_limit_low.shape[0]} != n_species ({n_sp})"
+        )
+        assert self.T_limit_high.shape[0] == n_sp, (
+            f"T_limit_high first dim {self.T_limit_high.shape[0]} != n_species ({n_sp})"
+        )
+        assert self.enthalpy_coeffs.shape[0] == n_sp, (
+            f"enthalpy_coeffs first dim {self.enthalpy_coeffs.shape[0]} != n_species ({n_sp})"
+        )
+        assert self.is_monoatomic.shape == (n_sp,), (
+            f"is_monoatomic shape {self.is_monoatomic.shape} != ({n_sp},)"
+        )
+
         # Check physical constraints
         assert jnp.all(self.molar_masses > 0), "All molar masses must be positive"
-
-        # Verify callables are present
-        assert callable(self.h_equilibrium), "h_equilibrium must be callable"
-        assert callable(self.cp_equilibrium), "cp_equilibrium must be callable"
-        assert callable(self.cv_trans_rot), "cv_trans_rot must be callable"
-        assert callable(self.cv_vib_electronic), "cv_vib_electronic must be callable"
-        assert callable(self.e_vib_electronic), "e_vib_electronic must be callable"
+        assert self.T_ref > 0, "T_ref must be positive"
 
     @property
     def n_species(self) -> int:
@@ -200,20 +189,6 @@ class SpeciesTable:
         return jnp.isfinite(self.vibrational_relaxation_factor)
 
     @property
-    def is_monoatomic(self) -> Float[jt.Array, " n_species"]:
-        """Boolean mask indicating which species are monoatomic (atoms).
-
-        Returns:
-            Boolean array where True = atom, False = molecule, shape (n_species,)
-
-        Notes:
-            - Atoms have no dissociation energy (cannot dissociate further)
-            - Molecules have dissociation energy (can break into atoms)
-            - This is equivalent to theta_rot == 0 but more semantically clear
-        """
-        return ~self.has_dissociation_energy
-
-    @property
     def electron_index(self) -> int | None:
         """Index of electron species, or None if not present."""
         try:
@@ -239,20 +214,6 @@ class SpeciesTable:
             raise ValueError(
                 f"Species '{name}' not found. Available species: {self.names}"
             )
-
-    def h(self, T_V: Float[jt.Array, " N"]) -> Float[jt.Array, "n_species N"]:
-        """Compute specific enthalpy for all species at given temperatures.
-
-        Delegates to the h_equilibrium callable which encapsulates the
-        temperature-dependent polynomial evaluation.
-
-        Args:
-            T_V: Temperature array [K]
-
-        Returns:
-            Enthalpy array [J/kg] for all species
-        """
-        return self.h_equilibrium(T_V)
 
     @classmethod
     def from_species_list(cls, species_list: list[Species]) -> "SpeciesTable":
@@ -311,63 +272,16 @@ class SpeciesTable:
             ]
         )
 
-        # Stack temperature ranges and parameters for enthalpy calculation
+        # Stack temperature ranges and polynomial coefficients
         T_limit_low = jnp.stack([s.T_limit_low for s in species_list], axis=0)
         T_limit_high = jnp.stack([s.T_limit_high for s in species_list], axis=0)
-        parameters = jnp.stack([s.parameters for s in species_list], axis=0)
+        enthalpy_coeffs = jnp.stack([s.parameters for s in species_list], axis=0)
 
-        is_monoatomic = ~jnp.isfinite(dissociation_energy)
+        # Compute is_monoatomic using the local helper function
+        is_monoatomic = _compute_is_monoatomic(dissociation_energy)
 
-        # Create equilibrium enthalpy callable with functools.partial
-        # This captures the curve fit data in the closure
-        h_equilibrium = partial(
-            thermodynamic_relations.compute_equilibrium_enthalpy_polynomial,
-            T_limit_low=T_limit_low,
-            T_limit_high=T_limit_high,
-            parameters=parameters,
-            molar_masses=molar_masses,
-        )
-
-        # Create specific heat (C_p) callable using SAME polynomial data
-        # C_p is computed via differentiation: C_p = dh/dT
-        cp_equilibrium = partial(
-            thermodynamic_relations.compute_cp_from_polynomial,
-            T_limit_low=T_limit_low,
-            T_limit_high=T_limit_high,
-            parameters=parameters,  # Same coefficients as h_equilibrium!
-            molar_masses=molar_masses,
-        )
-
-        # Create trans-rot specific heat callable (NEW)
-        cv_trans_rot = partial(
-            thermodynamic_relations.compute_cv_trans_rot,
-            is_monoatomic=is_monoatomic,
-            molar_masses=molar_masses,
-        )
-
-        # Create vib-electronic specific heat callable (NEW)
-        # Uses SAME polynomial data as h_equilibrium (just differentiated)
-        cv_vib_electronic = partial(
-            thermodynamic_relations.compute_cv_vib_electronic,
-            T_limit_low=T_limit_low,
-            T_limit_high=T_limit_high,
-            parameters=parameters,  # Same as enthalpy!
-            is_monoatomic=is_monoatomic,
-            molar_masses=molar_masses,
-        )
-
-        # Create vib-electronic internal energy callable (NEW)
-        # Uses SAME polynomial data, T_ref passed as parameter
-        T_ref = 298.16  # [K] - Pre-evaluated via functools.partial
-        e_vib_electronic = partial(
-            thermodynamic_relations.compute_e_vib_electronic,
-            T_ref=T_ref,
-            T_limit_low=T_limit_low,
-            T_limit_high=T_limit_high,
-            parameters=parameters,  # Same as enthalpy!
-            is_monoatomic=is_monoatomic,
-            molar_masses=molar_masses,
-        )
+        # Reference temperature for vibrational energy integration
+        T_ref = 298.16  # [K]
 
         return cls(
             names=names,
@@ -376,11 +290,11 @@ class SpeciesTable:
             dissociation_energy=dissociation_energy,
             ionization_energy=ionization_energy,
             vibrational_relaxation_factor=vibrational_relaxation_factor,
-            h_equilibrium=h_equilibrium,
-            cp_equilibrium=cp_equilibrium,
-            cv_trans_rot=cv_trans_rot,
-            cv_vib_electronic=cv_vib_electronic,
-            e_vib_electronic=e_vib_electronic,
+            T_limit_low=T_limit_low,
+            T_limit_high=T_limit_high,
+            enthalpy_coeffs=enthalpy_coeffs,
+            is_monoatomic=is_monoatomic,
+            T_ref=T_ref,
         )
 
 

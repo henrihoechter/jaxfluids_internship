@@ -9,6 +9,7 @@ from compressible_1d import equation_manager_types
 from compressible_1d import numerics_types
 from compressible_1d.chemistry_utils import load_species_table_from_gnoffo
 from compressible_1d import constants
+from compressible_1d import thermodynamic_relations
 
 # Configure JAX for testing
 jax.config.update("jax_enable_x64", True)
@@ -89,12 +90,12 @@ def test_full_workflow_species_table_to_primitives():
         U, equation_manager
     )
 
-    # 5. Test thermodynamic callables with extracted T, T_v
-    print("Testing thermodynamic callables...")
-    h = species_table.h_equilibrium(T)
-    cp = species_table.cp_equilibrium(T)
-    cv_tr = species_table.cv_trans_rot(T)
-    e_vib = species_table.e_vib_electronic(T_v)
+    # 5. Test thermodynamic functions with extracted T, T_v
+    print("Testing thermodynamic functions...")
+    h = thermodynamic_relations.compute_equilibrium_enthalpy(T, species_table)
+    cp = thermodynamic_relations.compute_cp(T, species_table)
+    cv_tr = thermodynamic_relations.compute_cv_tr(T, species_table)
+    e_vib = thermodynamic_relations.compute_e_ve(T_v, species_table)
 
     # Check shapes
     if h.shape != (n_species, n_cells):
@@ -128,13 +129,13 @@ def test_jax_jit_compilation():
 
     species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
 
-    # Test JIT compilation of thermodynamic callables
+    # Test JIT compilation of thermodynamic functions
     @jax.jit
     def compute_all_thermodynamic_properties(T, T_v):
-        h = species_table.h_equilibrium(T)
-        cp = species_table.cp_equilibrium(T)
-        cv_tr = species_table.cv_trans_rot(T)
-        e_vib = species_table.e_vib_electronic(T_v)
+        h = thermodynamic_relations.compute_equilibrium_enthalpy(T, species_table)
+        cp = thermodynamic_relations.compute_cp(T, species_table)
+        cv_tr = thermodynamic_relations.compute_cv_tr(T, species_table)
+        e_vib = thermodynamic_relations.compute_e_ve(T_v, species_table)
         return h, cp, cv_tr, e_vib
 
     T_test = jnp.array([300.0, 1000.0, 5000.0])
@@ -177,7 +178,7 @@ def test_jax_vmap_compatibility():
 
     # Define function to vmap
     def compute_enthalpy_single(T):
-        return species_table.h_equilibrium(T)
+        return thermodynamic_relations.compute_equilibrium_enthalpy(T, species_table)
 
     # Apply vmap over batch dimension
     compute_enthalpy_batch = jax.vmap(compute_enthalpy_single)
@@ -190,7 +191,7 @@ def test_jax_vmap_compatibility():
 
     # Verify results match non-batched version
     for i in range(batch_size):
-        h_single = species_table.h_equilibrium(T_batch[i])
+        h_single = thermodynamic_relations.compute_equilibrium_enthalpy(T_batch[i], species_table)
         if not jnp.allclose(h_batch[i], h_single):
             raise ValueError(f"vmap results differ from single call at index {i}")
 
@@ -209,11 +210,11 @@ def test_thermodynamic_consistency():
     T = jnp.array([500.0, 3000.0, 8000.0])
     dT = 0.1
 
-    h_plus = species_table.h_equilibrium(T + dT)
-    h_minus = species_table.h_equilibrium(T - dT)
+    h_plus = thermodynamic_relations.compute_equilibrium_enthalpy(T + dT, species_table)
+    h_minus = thermodynamic_relations.compute_equilibrium_enthalpy(T - dT, species_table)
     cp_numerical = (h_plus - h_minus) / (2 * dT)
 
-    cp_analytical = species_table.cp_equilibrium(T)
+    cp_analytical = thermodynamic_relations.compute_cp(T, species_table)
 
     rel_error = jnp.abs(cp_analytical - cp_numerical) / jnp.abs(cp_analytical)
     if not jnp.all(rel_error < 1e-6):
@@ -221,7 +222,7 @@ def test_thermodynamic_consistency():
 
     # Test 2: C_v,tr consistency for atoms vs molecules
     print("Testing C_v,tr for atoms vs molecules...")
-    cv_tr = species_table.cv_trans_rot(T)
+    cv_tr = thermodynamic_relations.compute_cv_tr(T, species_table)
 
     R = constants.R_universal
     M = species_table.molar_masses / 1e3
@@ -241,7 +242,7 @@ def test_thermodynamic_consistency():
     # Test 3: Vibrational energy monotonicity
     print("Testing vibrational energy monotonicity...")
     T_v = jnp.linspace(300.0, 10000.0, 20)
-    e_vib = species_table.e_vib_electronic(T_v)
+    e_vib = thermodynamic_relations.compute_e_ve(T_v, species_table)
 
     for i in jnp.where(is_molecule)[0]:
         de = jnp.diff(e_vib[i, :])

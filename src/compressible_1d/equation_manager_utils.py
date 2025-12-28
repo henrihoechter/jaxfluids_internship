@@ -6,6 +6,23 @@ from compressible_1d import constants
 from compressible_1d import thermodynamic_relations
 
 
+def compute_is_monoatomic(
+    dissociation_energy: Float[Array, " n_species"],
+) -> Float[Array, " n_species"]:
+    """Compute boolean mask indicating which species are monoatomic (atoms).
+
+    Atoms have no dissociation energy (NaN in array) because they cannot
+    dissociate into smaller pieces. Molecules have finite dissociation energy.
+
+    Args:
+        dissociation_energy: Dissociation energy array [J], NaN for atoms
+
+    Returns:
+        Boolean array where True = atom (monoatomic), False = molecule
+    """
+    return ~jnp.isfinite(dissociation_energy)
+
+
 def extract_primitives_from_U(
     U: Float[Array, "n_cells n_variables"],
     equation_manager: equation_manager_types.EquationManager,
@@ -66,11 +83,11 @@ def extract_primitives_from_U(
 
     # Solve for T_V using Newton-Raphson
     T_V_initial = jnp.full_like(rho, 298.16)  # [K]
-    T_V = thermodynamic_relations.solve_vibrational_temperature_from_v  ibrational_energy(
+    T_V = thermodynamic_relations.solve_vibrational_temperature_from_vibrational_energy(
         e_V_target=E_v,
         c_s=c_s.T,
         T_V_initial=T_V_initial,
-        e_vib_electronic_callable=equation_manager.species.e_vib_electronic,
+        species_table=equation_manager.species,
         max_iterations=20,
         rtol=1e-6,
         atol=1.0,
@@ -79,7 +96,7 @@ def extract_primitives_from_U(
     # Solve for T using direct formula
     # Compute cv_tr at a dummy temperature (it's constant for ideal gas)
     T_dummy = jnp.ones(1)
-    cv_tr_all = equation_manager.species.cv_trans_rot(T_dummy)  # (n_species, 1)
+    cv_tr_all = thermodynamic_relations.compute_cv_tr(T_dummy, equation_manager.species)  # (n_species, 1)
     cv_tr_broadcast = jnp.broadcast_to(
         cv_tr_all[:, 0, None], (n_species, rho.shape[0])
     )  # (n_species, n_cells)

@@ -1,14 +1,21 @@
 """Thermodynamic property calculations for species.
 
-This module contains pure functions for computing thermodynamic properties
-that can be used with functools.partial to create species-specific callables.
+This module contains pure functions for computing thermodynamic properties.
+High-level functions (compute_equilibrium_enthalpy, compute_cp, etc.) take
+a SpeciesTable as argument, while low-level functions take raw arrays.
 """
+
+from __future__ import annotations
+from typing import TYPE_CHECKING
 
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
 from compressible_1d import constants
+
+if TYPE_CHECKING:
+    from compressible_1d.chemistry_types import SpeciesTable
 
 
 def compute_equilibrium_enthalpy_polynomial(
@@ -394,7 +401,7 @@ def solve_vibrational_temperature_from_vibrational_energy(
     e_V_target: Float[Array, "..."],
     c_s: Float[Array, "n_species ..."],
     T_V_initial: Float[Array, "..."],
-    e_vib_electronic_callable: callable,
+    species_table: "SpeciesTable",
     max_iterations: int = 20,
     rtol: float = 1e-6,
     atol: float = 1.0,  # [K]
@@ -413,8 +420,7 @@ def solve_vibrational_temperature_from_vibrational_energy(
         e_V_target: Target vibrational energy [J/kg], shape (...)
         c_s: Mass fractions, shape (n_species, ...)
         T_V_initial: Initial guess for T_V [K], shape (...)
-        e_vib_electronic_callable: Function computing e_v(T_V), signature:
-            (T_V: Array[N]) -> Array[n_species, N]
+        species_table: SpeciesTable containing thermodynamic data
         max_iterations: Maximum Newton iterations
         rtol: Relative tolerance for convergence
         atol: Absolute tolerance [K] for temperature convergence
@@ -427,6 +433,19 @@ def solve_vibrational_temperature_from_vibrational_energy(
         - Converges when |ΔT_V| < atol or |ΔT_V/T_V| < rtol
         - If species have no vibrational modes (e_v = 0), returns T_V_initial
     """
+    # Extract coefficient data from species_table for use in nested functions
+    T_ref = species_table.T_ref
+    T_limit_low = species_table.T_limit_low
+    T_limit_high = species_table.T_limit_high
+    enthalpy_coeffs = species_table.enthalpy_coeffs
+    is_monoatomic = species_table.is_monoatomic
+    molar_masses = species_table.molar_masses
+
+    def compute_e_v_internal(T_V: Float[Array, " N"]) -> Float[Array, "n_species N"]:
+        """Compute vibrational energy using extracted coefficient data."""
+        return compute_e_vib_electronic(
+            T_V, T_ref, T_limit_low, T_limit_high, enthalpy_coeffs, is_monoatomic, molar_masses
+        )
 
     # Flatten input for scalar Newton iteration
     original_shape = e_V_target.shape
@@ -434,22 +453,11 @@ def solve_vibrational_temperature_from_vibrational_energy(
     T_V_flat = T_V_initial.flatten()
     c_s_flat = c_s.reshape(c_s.shape[0], -1)  # (n_species, N_flat)
 
-    def residual_fn(T_V_flat_iter):
-        """Residual function: f(T_V) = Σ c_s e_{v,s}(T_V) - e_V_target"""
-        # Compute e_v for all species at current T_V
-        e_v_species = e_vib_electronic_callable(T_V_flat_iter)  # (n_species, N)
-
-        # Compute mixture vibrational energy
-        e_V_computed = jnp.sum(c_s_flat * e_v_species, axis=0)  # (N,)
-
-        # Residual
-        return e_V_computed - e_V_flat
-
     # Create a scalar residual function for each cell
     def scalar_residual_fn(T_V_scalar, e_V_target_scalar, c_s_col):
         """Residual for a single cell: f(T_V) = Σ c_s e_{v,s}(T_V) - e_V_target"""
         # Compute e_v for all species at this T_V
-        e_v_species = e_vib_electronic_callable(
+        e_v_species = compute_e_v_internal(
             jnp.array([T_V_scalar])
         )  # (n_species, 1)
 
@@ -492,10 +500,9 @@ def solve_vibrational_temperature_from_vibrational_energy(
 
         converged = (abs_error < atol) | (rel_error < rtol)
 
-        if jnp.all(converged):
-            break
-
-        T_V_flat = T_V_new
+        # Update only non-converged cells (for JIT compatibility, we can't break early)
+        # Keep converged cells at their current value
+        T_V_flat = jnp.where(converged, T_V_flat, T_V_new)
 
     # Reshape back to original shape
     T_V_result = T_V_flat.reshape(original_shape)
@@ -546,3 +553,119 @@ def solve_T_from_internal_energy(
     T = T_ref + (e - e_V - e_0) / jnp.clip(cv_tr_mix, 1e-10, None)
 
     return T
+
+
+# =============================================================================
+# High-level API: Functions that take SpeciesTable as argument
+# =============================================================================
+
+
+def compute_equilibrium_enthalpy(
+    T: Float[Array, " N"],
+    species_table: "SpeciesTable",
+) -> Float[Array, "n_species N"]:
+    """Compute equilibrium enthalpy for all species.
+
+    Args:
+        T: Temperature array [K], shape (N,)
+        species_table: SpeciesTable containing coefficient data
+
+    Returns:
+        Specific enthalpy [J/kg] for all species, shape (n_species, N)
+    """
+    return compute_equilibrium_enthalpy_polynomial(
+        T,
+        species_table.T_limit_low,
+        species_table.T_limit_high,
+        species_table.enthalpy_coeffs,
+        species_table.molar_masses,
+    )
+
+
+def compute_cp(
+    T: Float[Array, " N"],
+    species_table: "SpeciesTable",
+) -> Float[Array, "n_species N"]:
+    """Compute specific heat at constant pressure for all species.
+
+    Args:
+        T: Temperature array [K], shape (N,)
+        species_table: SpeciesTable containing coefficient data
+
+    Returns:
+        C_p [J/(kg·K)] for all species, shape (n_species, N)
+    """
+    return compute_cp_from_polynomial(
+        T,
+        species_table.T_limit_low,
+        species_table.T_limit_high,
+        species_table.enthalpy_coeffs,
+        species_table.molar_masses,
+    )
+
+
+def compute_cv_tr(
+    T: Float[Array, " N"],
+    species_table: "SpeciesTable",
+) -> Float[Array, "n_species N"]:
+    """Compute translational-rotational specific heat for all species.
+
+    Args:
+        T: Temperature array [K], shape (N,) - not used but kept for API consistency
+        species_table: SpeciesTable containing is_monoatomic and molar_masses
+
+    Returns:
+        C_v,tr [J/(kg·K)] for all species, shape (n_species, N)
+    """
+    return compute_cv_trans_rot(
+        T,
+        species_table.is_monoatomic,
+        species_table.molar_masses,
+    )
+
+
+def compute_cv_ve(
+    T_V: Float[Array, " N"],
+    species_table: "SpeciesTable",
+) -> Float[Array, "n_species N"]:
+    """Compute vibrational-electronic specific heat for all species.
+
+    Args:
+        T_V: Vibrational temperature array [K], shape (N,)
+        species_table: SpeciesTable containing coefficient data
+
+    Returns:
+        C_v,V [J/(kg·K)] for all species, shape (n_species, N)
+    """
+    return compute_cv_vib_electronic(
+        T_V,
+        species_table.T_limit_low,
+        species_table.T_limit_high,
+        species_table.enthalpy_coeffs,
+        species_table.is_monoatomic,
+        species_table.molar_masses,
+    )
+
+
+def compute_e_ve(
+    T_V: Float[Array, " N"],
+    species_table: "SpeciesTable",
+) -> Float[Array, "n_species N"]:
+    """Compute vibrational-electronic internal energy for all species.
+
+    Args:
+        T_V: Vibrational temperature array [K], shape (N,)
+        species_table: SpeciesTable containing coefficient data and T_ref
+
+    Returns:
+        e_v [J/kg] for all species, shape (n_species, N)
+    """
+    return compute_e_vib_electronic(
+        T_V,
+        species_table.T_ref,
+        species_table.T_limit_low,
+        species_table.T_limit_high,
+        species_table.enthalpy_coeffs,
+        species_table.is_monoatomic,
+        species_table.molar_masses,
+    )

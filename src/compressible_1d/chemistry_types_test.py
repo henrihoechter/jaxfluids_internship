@@ -6,6 +6,7 @@ from pathlib import Path
 
 from compressible_1d.chemistry_utils import load_species_table_from_gnoffo
 from compressible_1d import constants
+from compressible_1d import thermodynamic_relations
 
 # Configure JAX for testing
 jax.config.update("jax_enable_x64", True)
@@ -147,12 +148,12 @@ def test_physical_constraints():
     print("All physical constraints satisfied")
 
 
-def test_h_equilibrium_callable():
-    """Test equilibrium enthalpy callable."""
+def test_equilibrium_enthalpy():
+    """Test equilibrium enthalpy function."""
     species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
 
     T = jnp.array([300.0, 1000.0, 5000.0, 10000.0])
-    h = species_table.h_equilibrium(T)
+    h = thermodynamic_relations.compute_equilibrium_enthalpy(T, species_table)
 
     # Check shape
     expected_shape = (species_table.n_species, len(T))
@@ -173,15 +174,15 @@ def test_h_equilibrium_callable():
         print("Warning: Some enthalpy values outside expected range [1e3, 1e8] J/kg")
         print(f"Range: [{jnp.min(h):.2e}, {jnp.max(h):.2e}]")
 
-    print(f"h_equilibrium callable test passed, shape: {h.shape}")
+    print(f"equilibrium_enthalpy test passed, shape: {h.shape}")
 
 
-def test_cp_equilibrium_callable():
-    """Test equilibrium specific heat callable."""
+def test_cp():
+    """Test specific heat at constant pressure function."""
     species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
 
     T = jnp.array([300.0, 1000.0, 5000.0, 10000.0])
-    cp = species_table.cp_equilibrium(T)
+    cp = thermodynamic_relations.compute_cp(T, species_table)
 
     # Check shape
     expected_shape = (species_table.n_species, len(T))
@@ -196,10 +197,10 @@ def test_cp_equilibrium_callable():
     # Avoid temperature range boundaries (300, 1000, 6000, 15000) to avoid discontinuities
     dT = 0.1
     T_test = jnp.array([500.0, 3000.0, 8000.0])
-    h_plus = species_table.h_equilibrium(T_test + dT)
-    h_minus = species_table.h_equilibrium(T_test - dT)
+    h_plus = thermodynamic_relations.compute_equilibrium_enthalpy(T_test + dT, species_table)
+    h_minus = thermodynamic_relations.compute_equilibrium_enthalpy(T_test - dT, species_table)
     cp_numerical = (h_plus - h_minus) / (2 * dT)
-    cp_analytical = species_table.cp_equilibrium(T_test)
+    cp_analytical = thermodynamic_relations.compute_cp(T_test, species_table)
 
     rel_error = jnp.abs(cp_analytical - cp_numerical) / jnp.abs(cp_analytical)
     if not jnp.all(rel_error < 1e-6):
@@ -214,15 +215,15 @@ def test_cp_equilibrium_callable():
                 )
         raise ValueError(f"C_p != dh/dT, max relative error: {jnp.max(rel_error):.2e}")
 
-    print(f"cp_equilibrium callable test passed, shape: {cp.shape}")
+    print(f"cp test passed, shape: {cp.shape}")
 
 
-def test_cv_trans_rot_callable():
-    """Test translational-rotational specific heat callable."""
+def test_cv_tr():
+    """Test translational-rotational specific heat function."""
     species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
 
     T = jnp.array([300.0, 1000.0, 5000.0])
-    cv_tr = species_table.cv_trans_rot(T)
+    cv_tr = thermodynamic_relations.compute_cv_tr(T, species_table)
 
     # Check shape
     expected_shape = (species_table.n_species, len(T))
@@ -258,15 +259,15 @@ def test_cv_trans_rot_callable():
             f"Molecule C_v,tr mismatch: expected {cv_tr_molecules_expected}, got {cv_tr_molecules_actual}"
         )
 
-    print(f"cv_trans_rot callable test passed, shape: {cv_tr.shape}")
+    print(f"cv_tr test passed, shape: {cv_tr.shape}")
 
 
-def test_e_vib_electronic_callable():
-    """Test vibrational-electronic energy callable."""
+def test_e_ve():
+    """Test vibrational-electronic energy function."""
     species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
 
     T_V = jnp.array([300.0, 1000.0, 5000.0, 10000.0])
-    e_vib = species_table.e_vib_electronic(T_V)
+    e_vib = thermodynamic_relations.compute_e_ve(T_V, species_table)
 
     # Check shape
     expected_shape = (species_table.n_species, len(T_V))
@@ -281,7 +282,7 @@ def test_e_vib_electronic_callable():
                 f"Vibrational energy for molecule {i} is not monotonically increasing"
             )
 
-    print(f"e_vib_electronic callable test passed, shape: {e_vib.shape}")
+    print(f"e_ve test passed, shape: {e_vib.shape}")
 
 
 # Tests are automatically discovered and run by pytest
