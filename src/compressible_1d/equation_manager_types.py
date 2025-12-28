@@ -8,6 +8,7 @@ from compressible_1d import numerics_types
 @dataclasses.dataclass(frozen=True, slots=True)
 class EquationManager:
     species: chemistry_types.SpeciesTable
+    collision_integrals: chemistry_types.CollisionIntegralTable | None
     reactions: list[chemistry_types.Reactions] | None
 
     numerics_config: numerics_types.NumericsConfig

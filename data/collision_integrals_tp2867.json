@@ -1,0 +1,32 @@
+{
+  "source": "NASA TP-2867 Table VI",
+  "description": "Collision integrals for 5-species air model (N, O, N2, O2, NO) at pe=0.001 atm",
+  "reference": "Gnoffo, P.A., Gupta, R.N., and Shinn, J.L., 'Conservation Equations and Physical Models for Hypersonic Air Flows in Thermal and Chemical Nonequilibrium', NASA TP-2867, 1989",
+  "units": {
+    "omega_values": "log10(pi * Omega^(k,k)_sr) in cm^2",
+    "temperature": "K"
+  },
+  "notes": [
+    "Values are log10(pi*Omega) where Omega is the collision integral in cm^2",
+    "Interpolation formula (Eq. 67): log10(piOmega(T)) = log10(piOmega(2000)) + slope*[ln(T) - ln(2000)]",
+    "slope = [log10(piOmega(4000)) - log10(piOmega(2000))] / [ln(4000) - ln(2000)]",
+    "This table contains only neutral-neutral interactions for 5-species air"
+  ],
+  "pairs": [
+    {"s": "N", "r": "N", "omega_11_2000": -14.08, "omega_11_4000": -14.74, "omega_22_2000": -14.11, "omega_22_4000": -14.82},
+    {"s": "N", "r": "O", "omega_11_2000": -14.76, "omega_11_4000": -14.69, "omega_22_2000": -14.86, "omega_22_4000": -14.80},
+    {"s": "N", "r": "N2", "omega_11_2000": -14.67, "omega_11_4000": -14.75, "omega_22_2000": -14.59, "omega_22_4000": -14.66},
+    {"s": "N", "r": "O2", "omega_11_2000": -14.66, "omega_11_4000": -14.74, "omega_22_2000": -14.59, "omega_22_4000": -14.66},
+    {"s": "N", "r": "NO", "omega_11_2000": -14.66, "omega_11_4000": -14.67, "omega_22_2000": -14.67, "omega_22_4000": -14.66},
+    {"s": "O", "r": "O", "omega_11_2000": -14.11, "omega_11_4000": -14.71, "omega_22_2000": -14.14, "omega_22_4000": -14.79},
+    {"s": "O", "r": "N2", "omega_11_2000": -14.63, "omega_11_4000": -14.55, "omega_22_2000": -14.72, "omega_22_4000": -14.64},
+    {"s": "O", "r": "O2", "omega_11_2000": -14.69, "omega_11_4000": -14.62, "omega_22_2000": -14.76, "omega_22_4000": -14.69},
+    {"s": "O", "r": "NO", "omega_11_2000": -14.66, "omega_11_4000": -14.59, "omega_22_2000": -14.74, "omega_22_4000": -14.66},
+    {"s": "N2", "r": "N2", "omega_11_2000": -14.56, "omega_11_4000": -14.50, "omega_22_2000": -14.65, "omega_22_4000": -14.58},
+    {"s": "N2", "r": "O2", "omega_11_2000": -14.58, "omega_11_4000": -14.51, "omega_22_2000": -14.63, "omega_22_4000": -14.54},
+    {"s": "N2", "r": "NO", "omega_11_2000": -14.57, "omega_11_4000": -14.51, "omega_22_2000": -14.64, "omega_22_4000": -14.56},
+    {"s": "O2", "r": "O2", "omega_11_2000": -14.60, "omega_11_4000": -14.64, "omega_22_2000": -14.54, "omega_22_4000": -14.57},
+    {"s": "O2", "r": "NO", "omega_11_2000": -14.59, "omega_11_4000": -14.63, "omega_22_2000": -14.52, "omega_22_4000": -14.56},
+    {"s": "NO", "r": "NO", "omega_11_2000": -14.58, "omega_11_4000": -14.64, "omega_22_2000": -14.52, "omega_22_4000": -14.56}
+  ]
+}

@@ -2,6 +2,7 @@
 
 Implements the main solver loop with operator splitting for source terms.
 """
+
 import warnings
 from jaxtyping import Array, Float
 import jax.numpy as jnp
@@ -15,6 +16,118 @@ from compressible_1d import transport
 from compressible_1d import equation_manager_utils
 from compressible_1d import thermodynamic_relations
 from compressible_1d.diagnose import runtime_check_array_sizes
+
+
+def check_diffusive_cfl(
+    U: Float[Array, "n_cells n_variables"],
+    equation_manager: equation_manager_types.EquationManager,
+) -> float | None:
+    """Check diffusive CFL condition and warn if violated.
+
+    The diffusive CFL condition requires:
+        dt <= dx^2 / (2 * max(nu, alpha, D))
+
+    where:
+        nu = mu/rho is kinematic viscosity
+        alpha = eta/(rho*cv) is thermal diffusivity
+        D = max species diffusion coefficient
+
+    Args:
+        U: Conserved state [n_cells, n_variables]
+        equation_manager: Contains configuration and collision integrals
+
+    Returns:
+        dt_diff: Maximum stable diffusive timestep [s], or None if inviscid
+    """
+    if equation_manager.collision_integrals is None:
+        return None
+
+    species_table = equation_manager.species
+    collision_integrals = equation_manager.collision_integrals
+    dx = equation_manager.numerics_config.dx
+    dt = equation_manager.numerics_config.dt
+    n_species = species_table.n_species
+
+    # Extract primitives
+    Y_s, rho, T, T_v, p = equation_manager_utils.extract_primitives_from_U(
+        U, equation_manager
+    )
+
+    # Compute mass fractions
+    rho_s = U[:, :n_species]
+    c_s = rho_s / rho[:, None]
+
+    # Build pair index matrix
+    pair_indices = transport.build_pair_index_matrix(
+        species_table.names, collision_integrals
+    )
+
+    # Interpolate collision integrals
+    pi_omega_11 = transport.interpolate_collision_integral(
+        T,
+        collision_integrals.omega_11_2000K,
+        collision_integrals.omega_11_4000K,
+    )
+    pi_omega_22 = transport.interpolate_collision_integral(
+        T,
+        collision_integrals.omega_22_2000K,
+        collision_integrals.omega_22_4000K,
+    )
+
+    # Compute modified collision integrals
+    M_s = species_table.molar_masses
+    delta_1 = transport.compute_modified_collision_integral_1(
+        T, M_s, M_s, pi_omega_11, pair_indices
+    )
+    delta_2 = transport.compute_modified_collision_integral_2(
+        T, M_s, M_s, pi_omega_22, pair_indices
+    )
+
+    # Compute molar concentrations
+    M_s_mol = M_s / 1000.0
+    gamma_s = c_s / M_s_mol
+
+    # Compute transport properties
+    mu = transport.compute_mixture_viscosity(T, gamma_s, M_s, delta_2)
+    eta_t = transport.compute_translational_thermal_conductivity(
+        T, gamma_s, M_s, delta_2
+    )
+
+    is_molecule = ~species_table.is_monoatomic.astype(bool)
+    eta_r = transport.compute_rotational_thermal_conductivity(
+        T, gamma_s, is_molecule, delta_1
+    )
+
+    # Total thermal conductivity
+    eta = eta_t + eta_r
+
+    # Compute diffusion coefficients
+    D_sr = transport.compute_binary_diffusion_coefficient(T, p, delta_1)
+    D_s = transport.compute_effective_diffusion_coefficient(gamma_s, M_s, D_sr)
+
+    # Compute cv for thermal diffusivity
+    cv_tr = thermodynamic_relations.compute_cv_tr(
+        T, species_table
+    )  # [n_species, n_cells]
+    cv_mix = jnp.sum(c_s * cv_tr.T, axis=1)  # [n_cells]
+
+    # Compute maximum stable diffusive timestep
+    dt_diff = viscous_flux_module.compute_diffusive_cfl(rho, mu, eta, D_s, cv_mix, dx)
+
+    # Convert to Python float for comparison
+    dt_diff_value = float(dt_diff)
+
+    if dt > dt_diff_value:
+        warnings.warn(
+            f"Diffusive CFL violated: dt={dt:.2e} > dt_diff={dt_diff_value:.2e}. "
+            f"Consider reducing dt by factor {dt/dt_diff_value:.1f}.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+    return dt_diff_value
+
+
 def run(
     U_init: Float[Array, "n_cells n_variables"],
     equation_manager: equation_manager_types.EquationManager,
@@ -224,10 +337,56 @@ def compute_convective_flux(
 
 @runtime_check_array_sizes
 def compute_dU_dt_diffusive(
-    U: Float[Array, "n_cells+n_halo_cells n_variables"],
+    U: Float[Array, "n_cells_with_halo n_variables"],
     equation_manager: equation_manager_types.EquationManager,
-) -> Float[Array, "n_cells n_variables"]:
-    pass
+) -> Float[Array, "n_cells_interior n_variables"]:
+    """Compute diffusive derivative dU/dt using viscous flux.
+
+    For inviscid case (collision_integrals=None), returns zeros.
+    For viscous case, computes flux divergence.
+
+    The viscous contribution follows from:
+        ∂U/∂t + ∂F_c/∂x = ∂F_v/∂x + S
+
+    where F_v is the viscous flux. The diffusive dU/dt is ∂F_v/∂x.
+
+    Args:
+        U: State with ghost cells [n_cells + 2*n_halo, n_variables]
+        equation_manager: Contains configuration and collision integrals
+
+    Returns:
+        dU_dt: Diffusive derivative [n_cells, n_variables]
+    """
+    n_halo = equation_manager.numerics_config.n_halo_cells
+    n_cells = U.shape[0] - 2 * n_halo
+    n_vars = U.shape[1]
+    dx = equation_manager.numerics_config.dx
+
+    # Check if viscous terms are enabled
+    if equation_manager.collision_integrals is None:
+        return jnp.zeros((n_cells, n_vars))
+
+    # Compute viscous flux at all interfaces (including ghost cells)
+    F_v = viscous_flux_module.compute_viscous_flux(U, equation_manager)
+
+    # F_v has shape [n_cells_with_halo - 1, n_variables]
+    # We need fluxes at interior cell interfaces
+    # Interior cells are from n_halo to n_halo + n_cells
+    # Left interface of cell i is at index i-1 in F_v (0-indexed from first interface)
+    # Right interface of cell i is at index i
+
+    # For interior cells [n_halo, n_halo+n_cells), we need:
+    # - Left flux: F_v[n_halo-1 : n_halo+n_cells-1]
+    # - Right flux: F_v[n_halo : n_halo+n_cells]
+    F_L = F_v[n_halo - 1 : n_halo + n_cells - 1, :]
+    F_R = F_v[n_halo : n_halo + n_cells, :]
+
+    # Flux divergence: dU/dt_diffusive = (F_R - F_L) / dx
+    # Note: This has the correct sign because F_v already accounts for
+    # the direction of diffusive transport
+    dU_dt = (F_R - F_L) / dx
+
+    return dU_dt
 
 
 @runtime_check_array_sizes
@@ -269,4 +428,3 @@ def integrate_in_time(
         raise ValueError(
             f"Unknown integrator: {equation_manager.numerics_config.integrator_scheme}"
         )
-

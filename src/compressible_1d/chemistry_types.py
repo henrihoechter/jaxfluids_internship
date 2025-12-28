@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import jax.numpy as jnp
 import jaxtyping as jt
-from jaxtyping import Float, Array
+from jaxtyping import Float
 from compressible_1d import constants
 
 
@@ -121,7 +121,9 @@ class SpeciesTable:
     enthalpy_coeffs: Float[jt.Array, "n_species n_ranges n_coeffs"]  # NASA coeffs
 
     # Derived properties
-    is_monoatomic: Float[jt.Array, " n_species"]  # Boolean: True = atom, False = molecule
+    is_monoatomic: Float[
+        jt.Array, " n_species"
+    ]  # Boolean: True = atom, False = molecule
 
     # Reference temperature for vibrational energy integration
     T_ref: float  # [K], typically 298.16
@@ -146,18 +148,18 @@ class SpeciesTable:
         ), f"vibrational_relaxation_factor shape {self.vibrational_relaxation_factor.shape} != ({n_sp},)"
 
         # Check shape consistency for coefficient arrays
-        assert self.T_limit_low.shape[0] == n_sp, (
-            f"T_limit_low first dim {self.T_limit_low.shape[0]} != n_species ({n_sp})"
-        )
-        assert self.T_limit_high.shape[0] == n_sp, (
-            f"T_limit_high first dim {self.T_limit_high.shape[0]} != n_species ({n_sp})"
-        )
-        assert self.enthalpy_coeffs.shape[0] == n_sp, (
-            f"enthalpy_coeffs first dim {self.enthalpy_coeffs.shape[0]} != n_species ({n_sp})"
-        )
-        assert self.is_monoatomic.shape == (n_sp,), (
-            f"is_monoatomic shape {self.is_monoatomic.shape} != ({n_sp},)"
-        )
+        assert (
+            self.T_limit_low.shape[0] == n_sp
+        ), f"T_limit_low first dim {self.T_limit_low.shape[0]} != n_species ({n_sp})"
+        assert (
+            self.T_limit_high.shape[0] == n_sp
+        ), f"T_limit_high first dim {self.T_limit_high.shape[0]} != n_species ({n_sp})"
+        assert (
+            self.enthalpy_coeffs.shape[0] == n_sp
+        ), f"enthalpy_coeffs first dim {self.enthalpy_coeffs.shape[0]} != n_species ({n_sp})"
+        assert self.is_monoatomic.shape == (
+            n_sp,
+        ), f"is_monoatomic shape {self.is_monoatomic.shape} != ({n_sp},)"
 
         # Check physical constraints
         assert jnp.all(self.molar_masses > 0), "All molar masses must be positive"
@@ -311,3 +313,79 @@ class Reactions:
 class ReactionTable:
     """Data structure containing multiple reactions in a format suitable for JAX
     processing."""
+
+
+@dataclass(frozen=True, slots=True)
+class CollisionIntegralTable:
+    """Collision integral data for transport property calculations.
+
+    Based on NASA TP-2867 Table VI. Stores log10(π·Ω^(k,k)_sr) at reference
+    temperatures (2000K and 4000K) for linear interpolation in ln(T).
+
+    The interpolation formula (Eq. 67 from TP-2867) is:
+        log10(πΩ^(k,k)_sr(T)) = log10(πΩ(2000)) + slope × [ln(T) - ln(2000)]
+    where:
+        slope = [log10(πΩ(4000)) - log10(πΩ(2000))] / [ln(4000) - ln(2000)]
+
+    All collision integrals are stored in cm² units (as in TP-2867 Table VI).
+    """
+
+    # Species pair names (s, r) - order matters for lookup
+    species_pairs: tuple[tuple[str, str], ...]
+
+    # Collision integrals at reference temperatures [n_pairs]
+    # Values are log10(π·Ω^(k,k)_sr) in cm²
+    omega_11_2000K: Float[jt.Array, " n_pairs"]  # log10(πΩ^(1,1)) at T=2000K
+    omega_11_4000K: Float[jt.Array, " n_pairs"]  # log10(πΩ^(1,1)) at T=4000K
+    omega_22_2000K: Float[jt.Array, " n_pairs"]  # log10(πΩ^(2,2)) at T=2000K
+    omega_22_4000K: Float[jt.Array, " n_pairs"]  # log10(πΩ^(2,2)) at T=4000K
+
+    def __post_init__(self):
+        """Validate data consistency."""
+        n_pairs = len(self.species_pairs)
+
+        assert self.omega_11_2000K.shape == (
+            n_pairs,
+        ), f"omega_11_2000K shape {self.omega_11_2000K.shape} != ({n_pairs},)"
+        assert self.omega_11_4000K.shape == (
+            n_pairs,
+        ), f"omega_11_4000K shape {self.omega_11_4000K.shape} != ({n_pairs},)"
+        assert self.omega_22_2000K.shape == (
+            n_pairs,
+        ), f"omega_22_2000K shape {self.omega_22_2000K.shape} != ({n_pairs},)"
+        assert self.omega_22_4000K.shape == (
+            n_pairs,
+        ), f"omega_22_4000K shape {self.omega_22_4000K.shape} != ({n_pairs},)"
+
+    @property
+    def n_pairs(self) -> int:
+        """Number of species pairs in the table."""
+        return len(self.species_pairs)
+
+    def get_pair_index(self, species_s: str, species_r: str) -> int:
+        """Get the index of a species pair.
+
+        Tries both orderings (s,r) and (r,s).
+
+        Args:
+            species_s: First species name
+            species_r: Second species name
+
+        Returns:
+            Index of the pair in the table
+
+        Raises:
+            ValueError: If pair not found
+        """
+        try:
+            return self.species_pairs.index((species_s, species_r))
+        except ValueError:
+            pass
+
+        try:
+            return self.species_pairs.index((species_r, species_s))
+        except ValueError:
+            raise ValueError(
+                f"Species pair ({species_s}, {species_r}) not found. "
+                f"Available pairs: {self.species_pairs[:5]}..."
+            )
