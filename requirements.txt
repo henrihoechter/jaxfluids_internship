@@ -1,8 +1,9 @@
 # lock the deps you need; the entrypoint installs these into .venv
-jax[cpu]>=0.4.26
+jax[cuda12]>=0.4.26
 jaxtyping>=0.2.29
 numpy>=1.26
 plotly>=5.24
+matplotlib
 tensorboard
 pytest
 pre-commit
@@ -13,3 +14,4 @@ pydantic
 pydantic-settings
 nbformat
 beartype
+pandas
