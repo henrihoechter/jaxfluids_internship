@@ -115,7 +115,7 @@ def test_compute_cv_trans_rot_atoms_vs_molecules():
 
     # Constants
     R = constants.R_universal
-    M = species_table.molar_masses / 1e3  # kg/mol
+    M = species_table.molar_masses  # kg/mol
 
     # Check atoms (is_monoatomic = True)
     is_atom = species_table.is_monoatomic.astype(bool)
@@ -222,7 +222,9 @@ def test_solve_vibrational_temperature_convergence():
     )  # Equal mass fractions
 
     # Compute e_V at target temperatures
-    e_V_target = thermodynamic_relations.compute_e_ve(T_V_target, species_table)  # Shape: (n_species, 3)
+    e_V_target = thermodynamic_relations.compute_e_ve(
+        T_V_target, species_table
+    )  # Shape: (n_species, 3)
 
     # Compute mixture vibrational energy
     e_V_mixture = jnp.sum(c_s * e_V_target, axis=0)  # Shape: (3,)
@@ -268,7 +270,9 @@ def test_solve_T_from_internal_energy_consistency():
     c_s = jnp.ones((species_table.n_species, len(T_known))) / species_table.n_species
 
     # Compute cv_tr
-    cv_tr = thermodynamic_relations.compute_cv_tr(jnp.array([1000.0]), species_table)  # Dummy T
+    cv_tr = thermodynamic_relations.compute_cv_tr(
+        jnp.array([1000.0]), species_table
+    )  # Dummy T
     cv_tr_broadcast = jnp.broadcast_to(
         cv_tr[:, 0, None], (species_table.n_species, len(T_known))
     )
@@ -344,7 +348,7 @@ def test_compute_reference_internal_energy_relationship():
 
     # Manual calculation
     R = constants.R_universal
-    M = species_table.molar_masses / 1e3  # kg/mol
+    M = species_table.molar_masses  # kg/mol
     h_s0 = species_table.h_s0
     e_s0_expected = h_s0 - R * T_ref / M
 

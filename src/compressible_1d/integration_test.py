@@ -191,7 +191,9 @@ def test_jax_vmap_compatibility():
 
     # Verify results match non-batched version
     for i in range(batch_size):
-        h_single = thermodynamic_relations.compute_equilibrium_enthalpy(T_batch[i], species_table)
+        h_single = thermodynamic_relations.compute_equilibrium_enthalpy(
+            T_batch[i], species_table
+        )
         if not jnp.allclose(h_batch[i], h_single):
             raise ValueError(f"vmap results differ from single call at index {i}")
 
@@ -211,7 +213,9 @@ def test_thermodynamic_consistency():
     dT = 0.1
 
     h_plus = thermodynamic_relations.compute_equilibrium_enthalpy(T + dT, species_table)
-    h_minus = thermodynamic_relations.compute_equilibrium_enthalpy(T - dT, species_table)
+    h_minus = thermodynamic_relations.compute_equilibrium_enthalpy(
+        T - dT, species_table
+    )
     cp_numerical = (h_plus - h_minus) / (2 * dT)
 
     cp_analytical = thermodynamic_relations.compute_cp(T, species_table)
@@ -225,7 +229,7 @@ def test_thermodynamic_consistency():
     cv_tr = thermodynamic_relations.compute_cv_tr(T, species_table)
 
     R = constants.R_universal
-    M = species_table.molar_masses / 1e3
+    M = species_table.molar_masses
     is_atom = species_table.is_monoatomic.astype(bool)
 
     # Atoms: C_v,tr = 1.5 R/M

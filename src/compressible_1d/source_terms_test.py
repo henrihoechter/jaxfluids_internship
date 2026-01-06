@@ -33,6 +33,7 @@ def create_test_equation_manager():
 
     return equation_manager_types.EquationManager(
         species=species_table,
+        collision_integrals=None,
         reactions=None,
         numerics_config=numerics_config,
         boundary_condition="periodic",
@@ -55,7 +56,9 @@ def create_equilibrium_state(n_cells, n_species, T=300.0):
     rho_E = rho_total * (e_total + 0.5 * u**2)
     rho_Ev = rho_total * e_v
 
-    U = jnp.concatenate([rho_s, rho_u[:, None], rho_E[:, None], rho_Ev[:, None]], axis=1)
+    U = jnp.concatenate(
+        [rho_s, rho_u[:, None], rho_E[:, None], rho_Ev[:, None]], axis=1
+    )
 
     return U
 
@@ -89,7 +92,9 @@ def test_frozen_chemistry_species_source_zero():
 
     # Species source terms should be zero (frozen chemistry)
     species_source = S[:, :n_species]
-    assert jnp.allclose(species_source, 0.0), "Species source should be zero for frozen chemistry"
+    assert jnp.allclose(
+        species_source, 0.0
+    ), "Species source should be zero for frozen chemistry"
 
     print("✓ Frozen chemistry species source test passed")
 
@@ -106,34 +111,13 @@ def test_equilibrium_vibrational_source_zero():
 
     # Vibrational relaxation should be near zero at equilibrium
     Q_v = S[:, n_species + 2]
-    
+
     # Allow some tolerance due to numerical precision
-    assert jnp.allclose(Q_v, 0.0, atol=1e-6), (
-        f"Vibrational source should be ~0 at equilibrium, got max |Q_v| = {jnp.max(jnp.abs(Q_v)):.2e}"
-    )
+    assert jnp.allclose(
+        Q_v, 0.0, atol=1e-6
+    ), f"Vibrational source should be ~0 at equilibrium, got max |Q_v| = {jnp.max(jnp.abs(Q_v)):.2e}"
 
     print("✓ Equilibrium vibrational source test passed")
-
-
-def test_vibrational_relaxation_sign():
-    """Test that vibrational relaxation has correct sign."""
-    equation_manager = create_test_equation_manager()
-    n_species = equation_manager.species.n_species
-    n_cells = 5
-
-    # Create non-equilibrium state: T_v < T (vibrational mode lagging behind)
-    # In this case, energy should flow from translation to vibration: Q_v < 0
-    # (ρE_v increases, so dρE_v/dt > 0, but total energy conservation means Q_v < 0)
-    
-    # Actually, let me reconsider: Q̇_v = ρ(e_v(T) - e_v(T_v))/τ_v
-    # If T > T_v: e_v(T) > e_v(T_v) → Q̇_v > 0 (energy flows into vibrational mode)
-    # If T < T_v: e_v(T) < e_v(T_v) → Q̇_v < 0 (energy flows out of vibrational mode)
-
-    U = create_equilibrium_state(n_cells, n_species, T=300.0)
-    
-    # This test is difficult without proper energy initialization
-    # Skip detailed sign checking for now
-    print("✓ Vibrational relaxation sign test passed (skipped detailed validation)")
 
 
 def test_chemical_source_zero():
@@ -146,7 +130,9 @@ def test_chemical_source_zero():
 
     S_chem = source_terms.compute_chemical_source(U, equation_manager)
 
-    assert jnp.allclose(S_chem, 0.0), "Chemical source should be zero for frozen chemistry"
+    assert jnp.allclose(
+        S_chem, 0.0
+    ), "Chemical source should be zero for frozen chemistry"
 
     print("✓ Chemical source zero test passed")
 
@@ -210,7 +196,9 @@ def test_momentum_source_zero():
 
     # Momentum source should be zero (inviscid)
     momentum_source = S[:, n_species]
-    assert jnp.allclose(momentum_source, 0.0), "Momentum source should be zero for inviscid"
+    assert jnp.allclose(
+        momentum_source, 0.0
+    ), "Momentum source should be zero for inviscid"
 
     print("✓ Momentum source zero test passed")
 

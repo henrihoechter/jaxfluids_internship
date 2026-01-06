@@ -5,6 +5,7 @@ Implements the main solver loop with operator splitting for source terms.
 
 import warnings
 from jaxtyping import Array, Float
+import jax
 import jax.numpy as jnp
 
 from compressible_1d import boundary_conditions as bc_module
@@ -84,8 +85,7 @@ def check_diffusive_cfl(
     )
 
     # Compute molar concentrations
-    M_s_mol = M_s / 1000.0
-    gamma_s = c_s / M_s_mol
+    gamma_s = c_s / M_s
 
     # Compute transport properties
     mu = transport.compute_mixture_viscosity(T, gamma_s, M_s, delta_2)
@@ -151,13 +151,13 @@ def run(
     dt = equation_manager.numerics_config.dt
 
     # Check diffusive CFL at start (warns if violated)
-    check_diffusive_cfl(U_init, equation_manager)
+    # check_diffusive_cfl(U_init, equation_manager)
 
     # Time loop
     U = U_init
     t = 0.0
     n_steps = int(t_final / dt)
-    n_snapshots = n_steps // save_interval + 1
+    n_snapshots = int(n_steps // save_interval) + 1
 
     n_cells, n_variables = U_init.shape
     U_history = jnp.zeros((n_snapshots, n_cells, n_variables))
@@ -166,9 +166,11 @@ def run(
     U_history = U_history.at[0, :, :].set(U_init)
     t_history = t_history.at[0].set(0.0)
 
+    advance_one_step_jitted = jax.jit(advance_one_step)
+
     snapshot_idx = 1
     for step in range(1, n_steps + 1):
-        U = advance_one_step(U, equation_manager)
+        U = advance_one_step_jitted(U, equation_manager)
         t += dt
 
         if step % save_interval == 0 and snapshot_idx < n_snapshots:

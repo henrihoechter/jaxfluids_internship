@@ -91,8 +91,8 @@ def compute_modified_collision_integral_1(
 
     Args:
         T: Temperature [K], shape (...)
-        M_s: Molar masses [kg/kmol], shape (n_species,)
-        M_r: Molar masses [kg/kmol], shape (n_species,)
+        M_s: Molar masses [kg/mol], shape (n_species,)
+        M_r: Molar masses [kg/mol], shape (n_species,)
         pi_omega_11: pi_Omega^(1,1) in cm², shape (..., n_pairs)
         pair_indices_sr: Indices into pi_omega_11 for each (s,r) pair, shape (n_species, n_species)
 
@@ -101,13 +101,9 @@ def compute_modified_collision_integral_1(
     """
     n_species = M_s.shape[0]
 
-    # Convert molar masses from kg/kmol to kg/mol
-    M_s_mol = M_s / 1000.0  # [kg/mol]
-    M_r_mol = M_r / 1000.0  # [kg/mol]
-
     # Compute mass factor for each pair
     # [2M_s·M_r / (pi·R·(M_s+M_r))]^(1/2)
-    M_s_grid, M_r_grid = jnp.meshgrid(M_s_mol, M_r_mol, indexing="ij")
+    M_s_grid, M_r_grid = jnp.meshgrid(M_s, M_r, indexing="ij")
     mass_factor = jnp.sqrt(
         2.0
         * M_s_grid
@@ -151,8 +147,8 @@ def compute_modified_collision_integral_2(
 
     Args:
         T: Temperature [K], shape (...)
-        M_s: Molar masses [kg/kmol], shape (n_species,)
-        M_r: Molar masses [kg/kmol], shape (n_species,)
+        M_s: Molar masses [kg/mol], shape (n_species,)
+        M_r: Molar masses [kg/mol], shape (n_species,)
         pi_omega_22: πΩ^(2,2) in cm², shape (..., n_pairs)
         pair_indices_sr: Indices into pi_omega_22 for each (s,r) pair, shape (n_species, n_species)
 
@@ -161,12 +157,8 @@ def compute_modified_collision_integral_2(
     """
     n_species = M_s.shape[0]
 
-    # Convert molar masses from kg/kmol to kg/mol
-    M_s_mol = M_s / 1000.0  # [kg/mol]
-    M_r_mol = M_r / 1000.0  # [kg/mol]
-
     # Compute mass factor for each pair
-    M_s_grid, M_r_grid = jnp.meshgrid(M_s_mol, M_r_mol, indexing="ij")
+    M_s_grid, M_r_grid = jnp.meshgrid(M_s, M_r, indexing="ij")
     mass_factor = jnp.sqrt(
         2.0 * M_s_grid * M_r_grid / (jnp.pi * R_UNIVERSAL * (M_s_grid + M_r_grid))
     )
@@ -236,14 +228,14 @@ def compute_mixture_viscosity(
     Args:
         T: Temperature [K], shape (n_cells,)
         gamma_s: Molar concentrations gamma_s = rho_s/(rho * M_s), shape (n_cells, n_species)
-        M_s: Molar masses [kg/kmol], shape (n_species,)
+        M_s: Molar masses [kg/mol], shape (n_species,)
         delta_2_sr: Modified collision integral Delta2, shape (n_cells, n_species, n_species)
 
     Returns:
         mu: Dynamic viscosity [Pa·s], shape (n_cells,)
     """
     # Molecular mass [kg/molecule]
-    m_s = M_s / (1000.0 * constants.N_A)  # [kg/molecule]
+    m_s = M_s / constants.N_A  # [kg/molecule]
 
     # Numerator: sum_s (m_s * gamma_s)
     numerator = jnp.sum(m_s * gamma_s, axis=-1)  # (n_cells,)
@@ -282,7 +274,7 @@ def compute_translational_thermal_conductivity(
     Args:
         T: Temperature [K], shape (n_cells,)
         gamma_s: Molar concentrations, shape (n_cells, n_species)
-        M_s: Molar masses [kg/kmol], shape (n_species,)
+        M_s: Molar masses [kg/mol], shape (n_species,)
         delta_2_sr: Modified collision integral Delta2, shape (n_cells, n_species, n_species)
 
     Returns:
@@ -421,7 +413,7 @@ def compute_effective_diffusion_coefficient(
 
     Args:
         gamma_s: Molar concentrations, shape (n_cells, n_species)
-        M_s: Molar masses [kg/kmol], shape (n_species,)
+        M_s: Molar masses [kg/mol], shape (n_species,)
         D_sr: Binary diffusion coefficients [m²/s], shape (n_cells, n_species, n_species)
 
     Returns:
@@ -432,11 +424,9 @@ def compute_effective_diffusion_coefficient(
     # Total molar concentration
     gamma_t = jnp.sum(gamma_s, axis=-1, keepdims=True)  # (n_cells, 1)
 
-    # Convert molar masses to kg/mol for consistency
-    M_s_mol = M_s / 1000.0  # [kg/mol]
     # Numerator: gamma_t^2·M_s·(1 - M_s·gamma_s)
     numerator = (
-        jnp.square(gamma_t) * M_s_mol * (1.0 - M_s_mol * gamma_s)
+        jnp.square(gamma_t) * M_s * (1.0 - M_s * gamma_s)
     )  # (n_cells, n_species)
 
     # Denominator: Σ_{r≠s} (gamma_r/D_sr)

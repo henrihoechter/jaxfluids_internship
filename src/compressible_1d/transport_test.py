@@ -34,8 +34,8 @@ def species_names():
 
 @pytest.fixture
 def molar_masses():
-    """Molar masses for 5-species air [kg/kmol]."""
-    return jnp.array([14.0067, 15.9994, 28.0134, 31.9988, 30.0061])
+    """Molar masses for 5-species air [kg/mol]."""
+    return jnp.array([14.0067, 15.9994, 28.0134, 31.9988, 30.0061]) / 1000.0
 
 
 class TestCollisionIntegralInterpolation:

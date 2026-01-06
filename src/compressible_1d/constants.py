@@ -9,3 +9,6 @@ e = constants.e  # [C] elementary charge
 R_universal = constants.R  # [J/(mol K)] universal gas constant
 
 amu_to_g = constants.atomic_mass  # [g]
+
+
+ATM_TO_PA = 101325.0  # [Pa] pressure of 1 atmosphere

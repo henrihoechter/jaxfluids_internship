@@ -1,7 +1,9 @@
 from dataclasses import dataclass, field
 from typing import Literal
+import jax
 
 
+@jax.tree_util.register_dataclass
 @dataclass(frozen=True, slots=True)
 class ClippingConfig:
     """Clipping limits for primitive and conserved variables.
@@ -33,12 +35,15 @@ class ClippingConfig:
     rho_Ev_max: float = 1e12
 
 
+@jax.tree_util.register_dataclass
 @dataclass(frozen=True, slots=True)
 class NumericsConfig:
     dt: float
     dx: float
-    integrator_scheme: Literal["forward-euler", "rk2"]
-    spatial_scheme: Literal["first_order", "muscl"]
-    flux_scheme: Literal["lax_friedrichs", "hllc"]
-    n_halo_cells: int  # per side
+    integrator_scheme: Literal["forward-euler", "rk2"] = field(
+        metadata=dict(static=True)
+    )
+    spatial_scheme: Literal["first_order", "muscl"] = field(metadata=dict(static=True))
+    flux_scheme: Literal["lax_friedrichs", "hllc"] = field(metadata=dict(static=True))
+    n_halo_cells: int = field(metadata=dict(static=True))  # per side
     clipping: ClippingConfig = field(default_factory=ClippingConfig)

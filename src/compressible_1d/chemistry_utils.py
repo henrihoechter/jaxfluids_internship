@@ -42,11 +42,8 @@ def load_species_from_gnoffo(
     """
 
     def _load_molar_mass(entry: dict) -> float:
-        """Convert molar mass from amu to kg/kmol.
-
-        Note: 1 amu = 1 g/mol = 1 kg/kmol (numerically identical)
-        """
-        return entry["molar_mass"]  # amu -> kg/kmol (no conversion needed)
+        """Convert molar mass from amu to kg/mol."""
+        return entry["molar_mass"] / 1000.0  # amu -> kg/mol
 
     def _load_h_s0(entry: dict) -> float:
         """Convert h_s0 from kcal/mol to J/kg.
@@ -58,10 +55,8 @@ def load_species_from_gnoffo(
         """
         kcal_per_mol = entry["h_s0"]
         J_per_mol = kcal_per_mol * 4184.0  # kcal/mol → J/mol
-        M_kg_per_mol = (
-            entry["molar_mass"] / 1000.0
-        )  # g/mol → kg/mol (molar_mass is in amu = g/mol)
-        J_per_kg = J_per_mol / M_kg_per_mol
+        M_s = _load_molar_mass(entry)  # kg/mol
+        J_per_kg = J_per_mol / M_s
         return J_per_kg
 
     def _load_dissociation_energy(entry: dict) -> float | None:

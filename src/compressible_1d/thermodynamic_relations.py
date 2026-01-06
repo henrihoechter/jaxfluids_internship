@@ -35,7 +35,7 @@ def compute_equilibrium_enthalpy_polynomial(
         T_limit_low: Lower temperature bounds for each range [K], shape (n_species, n_ranges)
         T_limit_high: Upper temperature bounds for each range [K], shape (n_species, n_ranges)
         parameters: Polynomial coefficients for each range, shape (n_species, n_ranges, n_parameters)
-        molar_masses: Molecular mass for each species [kg/kmol], shape (n_species,)
+        molar_masses: Molecular mass for each species [kg/mol], shape (n_species,)
 
     Returns:
         Specific enthalpy [J/kg] for all species, shape (n_species, N)
@@ -68,7 +68,7 @@ def compute_equilibrium_enthalpy_polynomial(
             # Evaluate polynomial: h = (R/M) * (a0*T + a1*T^2/2 + ... + a5)
             h_range = (
                 constants.R_universal
-                / (M / 1e3)
+                / M
                 * (
                     a[0] * T_V**1 / 1
                     + a[1] * T_V**2 / 2
@@ -108,7 +108,7 @@ def compute_cp_from_polynomial(
         T_limit_low: Lower temperature bounds [K], shape (n_species, n_ranges)
         T_limit_high: Upper temperature bounds [K], shape (n_species, n_ranges)
         parameters: Enthalpy polynomial coefficients [a0, ..., a5], shape (n_species, n_ranges, 6)
-        molar_masses: Molar mass [kg/kmol], shape (n_species,)
+        molar_masses: Molar mass [kg/mol], shape (n_species,)
 
     Returns:
         C_p [J/(kg·K)], shape (n_species, N)
@@ -138,7 +138,7 @@ def compute_cp_from_polynomial(
             # C_p = dh/dT = (R/M) * (a0 + a1*T + a2*T^2 + a3*T^3 + a4*T^4)
             cp_range = (
                 constants.R_universal
-                / (M / 1e3)
+                / M
                 * (a[0] + a[1] * T + a[2] * T**2 + a[3] * T**3 + a[4] * T**4)
             )
 
@@ -166,7 +166,7 @@ def compute_cv_trans_rot(
     Args:
         T: Temperature array [K], shape (N,) - not used but kept for API consistency
         is_monoatomic: Boolean mask indicating monoatomic species, shape (n_species,)
-        molar_masses: Molar mass [kg/kmol], shape (n_species,)
+        molar_masses: Molar mass [kg/mol], shape (n_species,)
 
     Returns:
         C_v,tr [J/(kg·K)], shape (n_species, N)
@@ -178,7 +178,7 @@ def compute_cv_trans_rot(
         - Combined: C_v,tr = (5/2) R/M (molecules), (3/2) R/M (atoms)
     """
     R = constants.R_universal  # J/(mol·K)
-    M = molar_masses / 1e3  # Convert kg/kmol -> kg/mol
+    M = molar_masses  # kg/mol
 
     # Compute C_v,tr per species (Gnoffo 1989, eq. 24, 25)
     cv_tr_species = jnp.where(
@@ -215,7 +215,7 @@ def compute_cv_vib_electronic(
         T_limit_high: Temperature range upper bounds [K], shape (n_species, n_ranges)
         parameters: Enthalpy polynomial coefficients, shape (n_species, n_ranges, 6)
         is_monoatomic: Boolean mask indicating monoatomic species, shape (n_species,)
-        molar_masses: Molar mass [kg/kmol], shape (n_species,)
+        molar_masses: Molar mass [kg/mol], shape (n_species,)
 
     Returns:
         C_{v,V} [J/(kg·K)], shape (n_species, N)
@@ -231,7 +231,7 @@ def compute_cv_vib_electronic(
 
     # Compute C_v = C_p - R/M (eq. 30)
     R = constants.R_universal
-    M = molar_masses / 1e3  # kg/kmol -> kg/mol
+    M = molar_masses  # kg/mol
     R_over_M = R / M  # Shape: (n_species,)
 
     cv = cp - R_over_M[:, None]  # Broadcast to (n_species, N)
@@ -269,7 +269,7 @@ def compute_e_vib_electronic(
         T_limit_high: Temperature range bounds [K], shape (n_species, n_ranges)
         parameters: Enthalpy polynomial coefficients, shape (n_species, n_ranges, 6)
         theta_rot: Rotational characteristic temperature [K], shape (n_species,)
-        molar_masses: Molar mass [kg/kmol], shape (n_species,)
+        molar_masses: Molar mass [kg/mol], shape (n_species,)
 
     Returns:
         e_v [J/kg], shape (n_species, N)
@@ -292,10 +292,10 @@ def compute_e_vib_electronic(
         """Integrate C_{v,V} for one species."""
 
         R = constants.R_universal
-        M_kg_mol = M_s / 1e3
+        M = M_s  # kg/mol
 
         # Compute C_v,tr constant for this species
-        cv_tr_s = jnp.where(~is_monoatomic_s, 2.5 * R / M_kg_mol, 1.5 * R / M_kg_mol)
+        cv_tr_s = jnp.where(~is_monoatomic_s, 2.5 * R / M, 1.5 * R / M)
 
         e_v = jnp.zeros_like(T_V)
 
@@ -311,7 +311,7 @@ def compute_e_vib_electronic(
             # C_{v,V} = C_v - C_{v,tr}
 
             # Compute C_{v,V} polynomial coefficients
-            R_over_M = R / M_kg_mol
+            R_over_M = R / M
             b_0 = R_over_M * (a[0] - 1) - cv_tr_s  # Constant term
             b_1 = R_over_M * a[1]  # Linear term
             b_2 = R_over_M * a[2]  # Quadratic term
@@ -378,7 +378,7 @@ def compute_reference_internal_energy(
 
     Args:
         h_s0: Formation enthalpy at reference [J/kg], shape (n_species,)
-        molar_masses: Molar mass [kg/kmol], shape (n_species,)
+        molar_masses: Molar mass [kg/mol], shape (n_species,)
         T_ref: Reference temperature [K]
 
     Returns:
@@ -390,7 +390,7 @@ def compute_reference_internal_energy(
         - T_ref = 298.16 K in current implementation
     """
     R = constants.R_universal
-    M = molar_masses / 1e3  # kg/kmol -> kg/mol
+    M = molar_masses  # kg/mol
 
     e_s0 = h_s0 - R * T_ref / M
 
@@ -444,7 +444,13 @@ def solve_vibrational_temperature_from_vibrational_energy(
     def compute_e_v_internal(T_V: Float[Array, " N"]) -> Float[Array, "n_species N"]:
         """Compute vibrational energy using extracted coefficient data."""
         return compute_e_vib_electronic(
-            T_V, T_ref, T_limit_low, T_limit_high, enthalpy_coeffs, is_monoatomic, molar_masses
+            T_V,
+            T_ref,
+            T_limit_low,
+            T_limit_high,
+            enthalpy_coeffs,
+            is_monoatomic,
+            molar_masses,
         )
 
     # Flatten input for scalar Newton iteration
@@ -457,9 +463,7 @@ def solve_vibrational_temperature_from_vibrational_energy(
     def scalar_residual_fn(T_V_scalar, e_V_target_scalar, c_s_col):
         """Residual for a single cell: f(T_V) = Σ c_s e_{v,s}(T_V) - e_V_target"""
         # Compute e_v for all species at this T_V
-        e_v_species = compute_e_v_internal(
-            jnp.array([T_V_scalar])
-        )  # (n_species, 1)
+        e_v_species = compute_e_v_internal(jnp.array([T_V_scalar]))  # (n_species, 1)
 
         # Compute mixture vibrational energy
         e_V_computed = jnp.sum(c_s_col * e_v_species[:, 0])

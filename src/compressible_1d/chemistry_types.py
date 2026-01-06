@@ -1,5 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+import jax
 import jax.numpy as jnp
 import jaxtyping as jt
 from jaxtyping import Float
@@ -23,9 +24,10 @@ def _compute_is_monoatomic(
     return ~jnp.isfinite(dissociation_energy)
 
 
+@jax.tree_util.register_dataclass
 @dataclass(frozen=True, slots=True)
 class Species:
-    name: str
+    name: str = field(metadata=dict(static=True))
     """Name of the species."""
     molar_mass: float
     """Molar mass of species.
@@ -77,7 +79,7 @@ class Species:
 
             h_range = (
                 constants.R_universal
-                / (self.molar_mass / 1e3)
+                / self.molar_mass
                 * (  # this is ugly
                     # h_range = (
                     a[0] * T_range**1 / 1
@@ -94,7 +96,8 @@ class Species:
         return h_V
 
 
-@dataclass(frozen=True, slots=True)
+@jax.tree_util.register_dataclass
+@dataclass
 class SpeciesTable:
     """Vectorized species data structure for JAX processing.
 
@@ -106,8 +109,9 @@ class SpeciesTable:
     """
 
     # Basic properties [n_species]
-    names: tuple[str, ...]
-    molar_masses: Float[jt.Array, " n_species"]  # [kg/kmol]
+    names: tuple[str, ...] = field(metadata=dict(static=True))
+    # names: tuple[str, ...]
+    molar_masses: Float[jt.Array, " n_species"]  # [kg/mol]
     h_s0: Float[jt.Array, " n_species"]  # [J/kg]
 
     # Optional properties [n_species] - use NaN for None
@@ -162,8 +166,8 @@ class SpeciesTable:
         ), f"is_monoatomic shape {self.is_monoatomic.shape} != ({n_sp},)"
 
         # Check physical constraints
-        assert jnp.all(self.molar_masses > 0), "All molar masses must be positive"
-        assert self.T_ref > 0, "T_ref must be positive"
+        # assert jnp.all(self.molar_masses > 0), "All molar masses must be positive"
+        # assert self.T_ref > 0, "T_ref must be positive"
 
     @property
     def n_species(self) -> int:

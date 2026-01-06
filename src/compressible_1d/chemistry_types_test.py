@@ -197,8 +197,12 @@ def test_cp():
     # Avoid temperature range boundaries (300, 1000, 6000, 15000) to avoid discontinuities
     dT = 0.1
     T_test = jnp.array([500.0, 3000.0, 8000.0])
-    h_plus = thermodynamic_relations.compute_equilibrium_enthalpy(T_test + dT, species_table)
-    h_minus = thermodynamic_relations.compute_equilibrium_enthalpy(T_test - dT, species_table)
+    h_plus = thermodynamic_relations.compute_equilibrium_enthalpy(
+        T_test + dT, species_table
+    )
+    h_minus = thermodynamic_relations.compute_equilibrium_enthalpy(
+        T_test - dT, species_table
+    )
     cp_numerical = (h_plus - h_minus) / (2 * dT)
     cp_analytical = thermodynamic_relations.compute_cp(T_test, species_table)
 
@@ -239,7 +243,7 @@ def test_cv_tr():
 
     # Check theoretical values
     R = constants.R_universal  # J/(mol·K)
-    M = species_table.molar_masses / 1e3  # kg/mol
+    M = species_table.molar_masses  # kg/mol
     is_atom = species_table.is_monoatomic.astype(bool)
 
     # Atoms: C_v,tr = 1.5 * R/M

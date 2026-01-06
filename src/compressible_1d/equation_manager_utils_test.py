@@ -47,6 +47,7 @@ def create_test_equation_manager():
     return equation_manager_types.EquationManager(
         species=species_table,
         reactions=None,
+        collision_integrals=None,
         numerics_config=numerics_config,
         boundary_condition="periodic",
     )
@@ -226,10 +227,10 @@ def test_extract_primitives_ideal_gas_law():
     )
 
     # Compute expected pressure from ideal gas law
-    # p = sum(rho_s * R * T / M_s)
+    # p = sum(rho_s * R_s * T) = sum(rho_s * (R_universal / M_s) * T)
     rho_s = U[:, :n_species]
     M_s = equation_manager.species.M_s
-    R = constants.R_universal * 1e3  # J/(kg·K) for per-kg basis
+    R = constants.R_universal  # J/(mol·K)
 
     # For equilibrium (no electrons), all species use T
     p_expected = jnp.sum(rho_s * R / M_s[None, :] * T[:, None], axis=-1)

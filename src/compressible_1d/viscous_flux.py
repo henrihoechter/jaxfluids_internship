@@ -253,9 +253,7 @@ def compute_viscous_flux(
     )
 
     # Compute molar concentrations gamma_s = rho_s / (rho*M_s) = c_s / M_s
-    # Note: M_s in kg/kmol, so divide by 1000 to get kg/mol
-    M_s_mol = M_s / 1000.0
-    gamma_s = c_s / M_s_mol  # [mol/kg] * [kg/m^3] = [mol/m^3] when multiplied by rho
+    gamma_s = c_s / M_s  # [mol/kg] * [kg/m^3] = [mol/m^3] when multiplied by rho
 
     # Compute transport properties at cell centers
     mu = transport.compute_mixture_viscosity(T, gamma_s, M_s, delta_2)
