@@ -4,14 +4,20 @@
         "charge": 0,
         "molar_mass": 14.0,
         "h_s0": 112.951,
-        "ionization_energy": 14.53
+        "ionization_energy": 14.53,
+        "sigma_es_a": 5.0e-20,
+        "sigma_es_b": 0.0,
+        "sigma_es_c": 0.0
     },
     {
         "name": "O",
         "charge": 0,
         "molar_mass": 16.0,
         "h_s0": 59.544,
-        "ionization_energy": 13.614
+        "ionization_energy": 13.614,
+        "sigma_es_a": 1.2e-20,
+        "sigma_es_b": 1.7e-24,
+        "sigma_es_c": -2.0e-29
     },
     {
         "name": "N2",
@@ -20,7 +26,10 @@
         "h_s0": 0.0,
         "dissociation_energy": 9.759,
         "ionization_energy": 15.51,
-        "vibrational_relaxation_factor": 220
+        "vibrational_relaxation_factor": 220,
+        "sigma_es_a": 7.5e-20,
+        "sigma_es_b": 5.5e-24,
+        "sigma_es_c": -1.0e-28
     },
     {
         "name": "O2",
@@ -29,7 +38,10 @@
         "h_s0": 0.0,
         "dissociation_energy": 5.115,
         "ionization_energy": 12.5,
-        "vibrational_relaxation_factor": 129
+        "vibrational_relaxation_factor": 129,
+        "sigma_es_a": 2.0e-20,
+        "sigma_es_b": 6.0e-24,
+        "sigma_es_c": 0.0
     },
     {
         "name": "NO",
@@ -38,7 +50,10 @@
         "h_s0": 21.6009,
         "dissociation_energy": 6.496,
         "ionization_energy": 9.5,
-        "vibrational_relaxation_factor": 168
+        "vibrational_relaxation_factor": 168,
+        "sigma_es_a": 1.0e-19,
+        "sigma_es_b": 0.0,
+        "sigma_es_c": 0.0
     },
     {
         "name": "N+",

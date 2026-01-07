@@ -65,6 +65,26 @@ class Species:
 
     [-]
     """
+    charge: int = 0
+    """Charge state: -1 for electron, 0 for neutral, +1 for ion.
+
+    [-]
+    """
+    sigma_es_a: float | None = None
+    """Electron-neutral collision cross-section coefficient a.
+
+    [m²]
+    """
+    sigma_es_b: float | None = None
+    """Electron-neutral collision cross-section coefficient b.
+
+    [m²/K]
+    """
+    sigma_es_c: float | None = None
+    """Electron-neutral collision cross-section coefficient c.
+
+    [m²/K²]
+    """
 
     def h(self, T_V: Float[jt.Array, " N"]) -> Float[jt.Array, " N"]:
         """Compute specific enthalpy at temperature T_V."""
@@ -119,6 +139,18 @@ class SpeciesTable:
     ionization_energy: Float[jt.Array, " n_species"]  # [J]
     vibrational_relaxation_factor: Float[jt.Array, " n_species"]  # [-]
 
+    # Charge state [n_species]
+    charge: Float[
+        jt.Array, " n_species"
+    ]  # [-1 for electron, 0 for neutral, +1 for ion]
+
+    # Electron-neutral collision cross-section coefficients (Eq. 66 from NASA TP-2867)
+    # σₑₛ = sigma_es_a + sigma_es_b * T_e + sigma_es_c * T_e²
+    # NaN for ions and electrons (use Coulomb formula instead)
+    sigma_es_a: Float[jt.Array, " n_species"]  # [m²]
+    sigma_es_b: Float[jt.Array, " n_species"]  # [m²/K]
+    sigma_es_c: Float[jt.Array, " n_species"]  # [m²/K²]
+
     # Polynomial coefficient data for thermodynamic calculations
     T_limit_low: Float[jt.Array, "n_species n_ranges"]  # [K]
     T_limit_high: Float[jt.Array, "n_species n_ranges"]  # [K]
@@ -150,6 +182,18 @@ class SpeciesTable:
         assert (
             self.vibrational_relaxation_factor.shape == (n_sp,)
         ), f"vibrational_relaxation_factor shape {self.vibrational_relaxation_factor.shape} != ({n_sp},)"
+        assert self.charge.shape == (
+            n_sp,
+        ), f"charge shape {self.charge.shape} != ({n_sp},)"
+        assert self.sigma_es_a.shape == (
+            n_sp,
+        ), f"sigma_es_a shape {self.sigma_es_a.shape} != ({n_sp},)"
+        assert self.sigma_es_b.shape == (
+            n_sp,
+        ), f"sigma_es_b shape {self.sigma_es_b.shape} != ({n_sp},)"
+        assert self.sigma_es_c.shape == (
+            n_sp,
+        ), f"sigma_es_c shape {self.sigma_es_c.shape} != ({n_sp},)"
 
         # Check shape consistency for coefficient arrays
         assert (
@@ -198,9 +242,24 @@ class SpeciesTable:
     def electron_index(self) -> int | None:
         """Index of electron species, or None if not present."""
         try:
-            return self.names.index("electron")
+            return self.names.index("e-")
         except ValueError:
             return None
+
+    @property
+    def is_electron(self) -> Float[jt.Array, " n_species"]:
+        """Boolean mask for electron species (charge == -1)."""
+        return self.charge == -1
+
+    @property
+    def is_ion(self) -> Float[jt.Array, " n_species"]:
+        """Boolean mask for ionized species (charge > 0)."""
+        return self.charge > 0
+
+    @property
+    def is_neutral(self) -> Float[jt.Array, " n_species"]:
+        """Boolean mask for neutral species (charge == 0)."""
+        return self.charge == 0
 
     def get_species_index(self, name: str) -> int:
         """Get the index of a species by name.
@@ -278,6 +337,29 @@ class SpeciesTable:
             ]
         )
 
+        # Vectorize charge (integer, no None handling needed)
+        charge = jnp.array([s.charge for s in species_list])
+
+        # Vectorize electron collision cross-section coefficients (NaN for None)
+        sigma_es_a = jnp.array(
+            [
+                s.sigma_es_a if s.sigma_es_a is not None else jnp.nan
+                for s in species_list
+            ]
+        )
+        sigma_es_b = jnp.array(
+            [
+                s.sigma_es_b if s.sigma_es_b is not None else jnp.nan
+                for s in species_list
+            ]
+        )
+        sigma_es_c = jnp.array(
+            [
+                s.sigma_es_c if s.sigma_es_c is not None else jnp.nan
+                for s in species_list
+            ]
+        )
+
         # Stack temperature ranges and polynomial coefficients
         T_limit_low = jnp.stack([s.T_limit_low for s in species_list], axis=0)
         T_limit_high = jnp.stack([s.T_limit_high for s in species_list], axis=0)
@@ -296,6 +378,10 @@ class SpeciesTable:
             dissociation_energy=dissociation_energy,
             ionization_energy=ionization_energy,
             vibrational_relaxation_factor=vibrational_relaxation_factor,
+            charge=charge,
+            sigma_es_a=sigma_es_a,
+            sigma_es_b=sigma_es_b,
+            sigma_es_c=sigma_es_c,
             T_limit_low=T_limit_low,
             T_limit_high=T_limit_high,
             enthalpy_coeffs=enthalpy_coeffs,

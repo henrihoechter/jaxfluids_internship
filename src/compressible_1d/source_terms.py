@@ -48,10 +48,19 @@ def compute_source_terms(
     # No total energy source (inviscid, frozen chemistry)
     # S[:, n_species + 1] = 0
 
-    # Vibrational energy relaxation
-    # Q_v = compute_vibrational_relaxation(U, equation_manager)
-    Q_v = compute_vibrational_relaxation_new(U, equation_manager)
-    S = S.at[:, n_species + 2].set(Q_v)  # Last variable is ρE_v
+    # === Vibrational-Electronic Energy Sources (Eq. 16 from NASA TP-2867) ===
+
+    # Term 6: Vibrational-translational relaxation
+    Q_TV = compute_vibrational_relaxation_new(U, equation_manager)
+
+    # Term 7: Electron-translational relaxation
+    Q_eT = compute_eT_relaxation(U, equation_manager)
+
+    # Term 8: Electron impact ionization loss (= 0 for frozen chemistry)
+    Q_ion = compute_electron_impact_ionization_loss(U, equation_manager)
+
+    # Total source for vibrational-electronic energy (last variable = ρE_v)
+    S = S.at[:, n_species + 2].set(Q_TV + Q_eT + Q_ion)
 
     return S
 
@@ -306,3 +315,224 @@ def compute_chemical_source(
     """
     # Frozen chemistry: no reactions (ω̇_i = 0 for all species)
     return jnp.zeros_like(U)
+
+
+def compute_electron_neutral_collision_frequency(
+    n_s: Float[Array, "n_cells n_species"],
+    T_e: Float[Array, "n_cells"],
+    M_e: float,
+    sigma_es_a: Float[Array, " n_species"],
+    sigma_es_b: Float[Array, " n_species"],
+    sigma_es_c: Float[Array, " n_species"],
+) -> Float[Array, "n_cells n_species"]:
+    """Compute electron-neutral collision frequency nu_es.
+
+    Implements equations (65) and (66) from NASA TP-2867:
+        Eq. 65: nu_es = n_s * sigma_es * sqrt(8*k*T_e/(pi*m_e))
+        Eq. 66: sigma_es = sigma_es_a + sigma_es_b*T_e + sigma_es_c*T_e^2
+
+    Args:
+        n_s: Number density of each species [n_cells, n_species] in [1/m³]
+        T_e: Electron temperature (= T_V in 2-temp model) [n_cells] in [K]
+        M_e: Electron molar mass [kg/mol]
+        sigma_es_a: Cross-section coefficient a [n_species] in [m²]
+        sigma_es_b: Cross-section coefficient b [n_species] in [m²/K]
+        sigma_es_c: Cross-section coefficient c [n_species] in [m²/K²]
+
+    Returns:
+        nu_es: Collision frequency [n_cells, n_species] in [1/s]
+               Returns 0 for species with NaN coefficients (ions, electrons)
+    """
+    # Cross-section: sigma_es = sigma_es_a + sigma_es_b*T_e + sigma_es_c*T_e^2
+    # Shape: [n_cells, n_species]
+    sigma_es = (
+        sigma_es_a[None, :]
+        + sigma_es_b[None, :] * T_e[:, None]
+        + sigma_es_c[None, :] * T_e[:, None] ** 2
+    )
+
+    # Handle NaN coefficients (ions/electrons don't use this formula)
+    sigma_es = jnp.where(jnp.isnan(sigma_es), 0.0, sigma_es)
+
+    # Electron mass from molar mass: m_e = M_e / N_A
+    m_e = M_e / constants.N_A  # [kg]
+
+    # Electron thermal velocity: c_e = sqrt(8*k*T_e/(pi*m_e))
+    c_e = jnp.sqrt(8.0 * constants.k * T_e / (jnp.pi * m_e))  # [n_cells]
+
+    # Collision frequency: nu_es = n_s * sigma_es * c_e
+    nu_es = n_s * sigma_es * c_e[:, None]
+
+    return nu_es
+
+
+def compute_electron_ion_collision_frequency(
+    n_s: Float[Array, "n_cells n_species"],
+    n_e: Float[Array, "n_cells"],
+    T_e: Float[Array, "n_cells"],
+    M_e: float,
+) -> Float[Array, "n_cells n_species"]:
+    """Compute Coulomb collision frequency for electron-ion collisions.
+
+    Implements equation (64) from NASA TP-2867:
+        nu_es = (8/3)(pi/m_e)^(1/2) × n_s e^4/(2kT_e)^(3/2) × ln[k^3 T_e^3/(pi n_e e^6)]
+
+    Note: The elementary charge 'e' in the NASA TP-2867 formulas is in CGS/esu units
+    (statcoulombs). However, using SI units with proper unit conversion gives the
+    same result when e is in Coulombs and we use epsilon_0 (permittivity of free space).
+
+    Args:
+        n_s: Number density of ions [n_cells, n_species] in [1/m³]
+        n_e: Electron number density [n_cells] in [1/m³]
+        T_e: Electron temperature [K]
+        M_e: Electron molar mass [kg/mol]
+
+    Returns:
+        nu_es: Coulomb collision frequency [n_cells, n_species] in [1/s]
+    """
+
+    # TODO: this is not like proposed by gnoffo
+
+    # Electron mass from molar mass
+    m_e = M_e / constants.N_A  # [kg]
+
+    # For SI units, the Coulomb logarithm becomes:
+    # ln_Lambda = ln(12pi n_e lambda_D^3) where lambda_D = sqrt(epsilon_0 k T_e / (n_e e^2))
+    # Simplified: ln_Lambda ≈ ln((k T_e)^(3/2) / (e^3 sqrt(pi n_e)))
+    # Using practical formula: ln_Lambda ≈ 23 - ln(sqrt(n_e) / T_e^(3/2)) for typical plasma
+
+    epsilon_0 = constants.epsilon_0  # Permittivity of free space [F/m]
+    e_SI = constants.e  # Elementary charge [C]
+
+    # Debye length: lambda_D = sqrt(epsilon_0 k T_e / (n_e e^2))
+    lambda_D_sq = epsilon_0 * constants.k * T_e / (n_e * e_SI**2 + 1e-30)
+
+    # Coulomb logarithm: ln_Lambda = ln(12pi n_e lambda_D^3)
+    # = ln(12pi) + ln(n_e) + 1.5*ln(lambda_D^2)
+    # Ensure argument is positive
+    ln_arg = 12.0 * jnp.pi * n_e * lambda_D_sq**1.5
+    ln_Lambda = jnp.log(jnp.maximum(ln_arg, 1.0))
+
+    # Collision frequency in SI units:
+    # nu_ei = (n_i Z^2 e^4 ln_Lambda) / (4pi epsilon_0^2 m_e^2 v_e^3)
+    # where v_e = sqrt(2 k T_e / m_e) (thermal velocity)
+    # Simplifying: nu_ei = n_i Z^2 e^4 ln_Lambda / (16pi epsilon_0^2 m_e^(1/2) (k T_e)^(3/2))
+
+    # For singly charged ions (Z=1):
+    prefactor = e_SI**4 / (16.0 * jnp.pi * epsilon_0**2 * jnp.sqrt(m_e))
+    nu_es = prefactor * n_s * ln_Lambda[:, None] / (constants.k * T_e[:, None]) ** 1.5
+
+    return nu_es
+
+
+def compute_eT_relaxation(
+    U: Float[Array, "n_cells n_variables"],
+    equation_manager: equation_manager_types.EquationManager,
+) -> Float[Array, "n_cells"]:
+    """Compute electron-translational energy relaxation source term (Term 7).
+
+    Implements Term 7 from Eq. 16 (NASA TP-2867):
+        Q_eT = 2 * rho_e * (3 * R_bar / (2 * M_e)) * (T - T_v) × sum_s nu_es / M_s
+
+    This represents elastic collision energy exchange between electrons
+    (at T_v in 2-temp model) and heavy particles (at T).
+
+    Physical interpretation:
+    - When T > T_v: heavy particles transfer energy to electrons → positive source
+    - When T < T_v: electrons transfer energy to heavy particles → negative source
+
+    Args:
+        U: Conserved state [n_cells, n_variables]
+        equation_manager: Contains species data
+
+    Returns:
+        Q_eT: Source term for vibrational-electronic energy [W/m³]
+    """
+    species = equation_manager.species
+    n_cells = U.shape[0]
+
+    # Check if electrons exist in the species table
+    electron_idx = species.electron_index
+    if electron_idx is None:
+        return jnp.zeros(n_cells)  # No electrons → term = 0
+
+    # Extract primitives
+    Y_s, rho, T, T_v, p = equation_manager_utils.extract_primitives_from_U(
+        U, equation_manager
+    )
+
+    # Electron properties
+    Y_e = Y_s[:, electron_idx]
+    rho_e = rho * Y_e  # Electron density [kg/m³]
+    M_e = species.molar_masses[electron_idx]  # Electron molar mass [kg/mol]
+    n_e = rho_e * constants.N_A / M_e  # Electron number density [1/m³]
+    T_e = T_v  # In 2-temp model, T_e = T_v
+
+    # Compute number densities for all species [n_cells, n_species]
+    n_s = rho[:, None] * Y_s * constants.N_A / species.molar_masses[None, :]
+
+    # Initialize collision frequencies to zero
+    nu_es = jnp.zeros((n_cells, species.n_species))
+
+    # Compute collision frequencies for neutrals (Eq. 65-66)
+    nu_es_neutral = compute_electron_neutral_collision_frequency(
+        n_s,
+        T_e,
+        M_e,
+        species.sigma_es_a,
+        species.sigma_es_b,
+        species.sigma_es_c,
+    )
+    # Only use for neutral species (charge == 0)
+    neutral_mask = species.is_neutral
+    nu_es = jnp.where(neutral_mask[None, :], nu_es_neutral, nu_es)
+
+    # Compute collision frequencies for ions (Eq. 64 - Coulomb collisions)
+    nu_es_ion = compute_electron_ion_collision_frequency(n_s, n_e, T_e, M_e)
+    # Only use for ionized species (charge > 0)
+    ion_mask = species.is_ion
+    nu_es = jnp.where(ion_mask[None, :], nu_es_ion, nu_es)
+
+    # Sum: sum_s nu_es / M_s (exclude electrons from the sum)
+    heavy_mask = jnp.logical_not(species.is_electron)
+    sum_nu_over_M = jnp.sum(
+        jnp.where(heavy_mask[None, :], nu_es / species.molar_masses[None, :], 0.0),
+        axis=1,
+    )
+
+    # Term 7: Q_eT = 2 * rho_e * (3 * R_bar / (2 * M_e)) * (T - T_v) * sum_nu_over_M
+    R_bar = constants.R_universal
+    Q_eT = 2.0 * rho_e * (3.0 * R_bar / 2.0) * (T - T_v) * sum_nu_over_M
+
+    return Q_eT
+
+
+def compute_electron_impact_ionization_loss(
+    U: Float[Array, "n_cells n_variables"],
+    equation_manager: equation_manager_types.EquationManager,
+) -> Float[Array, "n_cells"]:
+    """Compute electron energy loss due to electron impact ionization (Term 8).
+
+    Implements Term 8 from Eq. 16 (NASA TP-2867):
+        Q_ion = -sum_s (n_dot_e_s * I_hat_s)
+
+    where:
+        n_dot_e_s = molar ionization rate of species s by electron impact [mol/m³/s]
+        I_hat_s = first ionization energy of species s [J/mol]
+
+    For FROZEN CHEMISTRY: returns 0 (no reactions → n_dot_e_s = 0)
+
+    Future implementation requires:
+        - Ionization reaction rates from chemical kinetics
+        - Reactions: N + e_minus -> N_plus + 2e_minus, O + e_minus -> O_plus + 2e_minus, etc.
+
+    Args:
+        U: Conserved state [n_cells, n_variables]
+        equation_manager: Contains species and reaction data
+
+    Returns:
+        Q_ion: Energy loss rate [W/m³] (negative = energy removed from electron mode)
+    """
+    # Frozen chemistry: no ionization reactions
+    n_cells = U.shape[0]
+    return jnp.zeros(n_cells)

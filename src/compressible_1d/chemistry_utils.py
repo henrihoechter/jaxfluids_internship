@@ -95,6 +95,10 @@ def load_species_from_gnoffo(
             dissociation_energy=_load_dissociation_energy(entry),
             ionization_energy=_load_ionization_energy(entry),
             vibrational_relaxation_factor=entry.get("vibrational_relaxation_factor"),
+            charge=entry.get("charge", 0),
+            sigma_es_a=entry.get("sigma_es_a"),
+            sigma_es_b=entry.get("sigma_es_b"),
+            sigma_es_c=entry.get("sigma_es_c"),
         )
         species_list.append(species)
 
