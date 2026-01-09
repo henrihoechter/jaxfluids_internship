@@ -176,8 +176,19 @@ def compute_U_from_primitives(
            shape (n_cells, n_variables)
     """
     n_species = equation_manager.species.n_species
-    n_cells = rho.shape[0]
     M_s = equation_manager.species.M_s
+
+    # Validate that all primitives are provided for each species
+    primitives = {"Y_s": Y_s, "rho": rho, "u": u, "T_tr": T_tr, "T_V": T_V}
+    for name, arr in primitives.items():
+        if arr.shape[0] != n_species:
+            raise ValueError(
+                f"{name} has {arr.shape[0]} values but equation_manager has "
+                f"{n_species} species ({equation_manager.species.names}). "
+                f"All primitive variables must be provided for each species."
+            )
+
+    n_cells = rho.shape[0]
 
     # Convert mole fractions to mass fractions (Gnoffo eq. 88 inverted)
     # Y_s = (rho_s / M_s) / sum(rho_s / M_s) = (c_s / M_s) / sum(c_s / M_s)
