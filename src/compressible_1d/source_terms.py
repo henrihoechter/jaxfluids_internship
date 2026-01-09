@@ -51,13 +51,16 @@ def compute_source_terms(
     # === Vibrational-Electronic Energy Sources (Eq. 16 from NASA TP-2867) ===
 
     # Term 6: Vibrational-translational relaxation
-    Q_TV = compute_vibrational_relaxation_new(U, equation_manager)
+    Q_TV = compute_vibrational_relaxation(U, equation_manager)
+
+    Q_eT = jnp.zeros_like(Q_TV)
+    Q_ion = jnp.zeros_like(Q_TV)
 
     # Term 7: Electron-translational relaxation
-    Q_eT = compute_eT_relaxation(U, equation_manager)
+    # Q_eT = compute_eT_relaxation(U, equation_manager)
 
-    # Term 8: Electron impact ionization loss (= 0 for frozen chemistry)
-    Q_ion = compute_electron_impact_ionization_loss(U, equation_manager)
+    # # Term 8: Electron impact ionization loss (= 0 for frozen chemistry)
+    # Q_ion = compute_electron_impact_ionization_loss(U, equation_manager)
 
     # Total source for vibrational-electronic energy (last variable = ρE_v)
     S = S.at[:, n_species + 2].set(Q_TV + Q_eT + Q_ion)
@@ -66,51 +69,6 @@ def compute_source_terms(
 
 
 def compute_vibrational_relaxation(
-    U: Float[Array, "n_cells n_variables"],
-    equation_manager: equation_manager_types.EquationManager,
-) -> Float[Array, "n_cells"]:
-    """Compute vibrational relaxation source term Q_dot_v.
-
-    Q_dot_v = rho * (e_v(T) - e_v(T_v)) / tau_v
-
-    where:
-    - e_v(T): equilibrium vibrational energy at temperature T
-    - e_v(T_v): actual vibrational energy at T_v
-    - tau_v: Millikan-White relaxation time with Park correction
-
-    Args:
-        U: Conserved state [n_cells, n_variables]
-        equation_manager: Contains species table
-
-    Returns:
-        Q_dot_v: Relaxation source term [n_cells] in W/m³
-    """
-    Y_s, rho, T, T_v, p = equation_manager_utils.extract_primitives_from_U(
-        U, equation_manager
-    )
-
-    # Compute equilibrium vibrational energy at T
-    e_v_eq_species = thermodynamic_relations.compute_e_ve(
-        T, equation_manager.species
-    )  # [n_species, n_cells]
-    e_v_eq = jnp.sum(Y_s * e_v_eq_species.T, axis=1)  # [n_cells]
-
-    # Compute actual vibrational energy at T_v
-    e_v_species = thermodynamic_relations.compute_e_ve(
-        T_v, equation_manager.species
-    )  # [n_species, n_cells]
-    e_v_actual = jnp.sum(Y_s * e_v_species.T, axis=1)  # [n_cells]
-
-    tau_v = tau_v = jnp.full_like(
-        T, 1e-7
-    )  # TODO: replace with actual relaxation time computation
-
-    Q_dot_v = rho * (e_v_eq - e_v_actual) / (tau_v + 1e-14)
-
-    return Q_dot_v
-
-
-def compute_vibrational_relaxation_new(
     U: Float[Array, "n_cells n_variables"],
     equation_manager: equation_manager_types.EquationManager,
 ) -> Float[Array, "n_cells"]:
