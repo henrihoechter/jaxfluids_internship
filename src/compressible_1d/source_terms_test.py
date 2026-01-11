@@ -6,7 +6,7 @@ from pathlib import Path
 
 from compressible_1d import source_terms
 from compressible_1d import equation_manager_types, numerics_types
-from compressible_1d.chemistry_utils import load_species_table_from_gnoffo
+from compressible_1d.chemistry_utils import load_species_table
 
 # Configure JAX for testing
 jax.config.update("jax_enable_x64", True)
@@ -19,7 +19,7 @@ enthalpy_data = str(data_dir / "air_5_gnoffo_equilibrium_enthalpy.json")
 
 def create_test_equation_manager():
     """Create test EquationManager."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     numerics_config = numerics_types.NumericsConfig(
         dt=1e-6,

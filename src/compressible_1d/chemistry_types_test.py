@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 from pathlib import Path
 
-from compressible_1d.chemistry_utils import load_species_table_from_gnoffo
+from compressible_1d.chemistry_utils import load_species_table
 from compressible_1d import constants
 from compressible_1d import thermodynamic_relations
 
@@ -19,7 +19,7 @@ enthalpy_data = str(data_dir / "air_5_gnoffo_equilibrium_enthalpy.json")
 
 def test_has_dissociation_energy():
     """Test that molecules have dissociation energy, atoms do not."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     has_diss = species_table.has_dissociation_energy
 
@@ -37,7 +37,7 @@ def test_has_dissociation_energy():
 
 def test_has_ionization_energy():
     """Test that species have ionization energy (except electrons if present)."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     has_ion = species_table.has_ionization_energy
 
@@ -54,7 +54,7 @@ def test_has_ionization_energy():
 
 def test_has_vibrational_mode():
     """Test that molecules have vibrational modes, atoms do not."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     has_vib = species_table.has_vibrational_mode
 
@@ -69,7 +69,7 @@ def test_has_vibrational_mode():
 
 def test_is_monoatomic():
     """Test the new is_monoatomic property."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     is_monoatomic = species_table.is_monoatomic
 
@@ -92,7 +92,7 @@ def test_is_monoatomic():
 
 def test_electron_index():
     """Test electron index lookup."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     electron_idx = species_table.electron_index
 
@@ -105,7 +105,7 @@ def test_electron_index():
 
 def test_array_shapes_consistency():
     """Test that all per-species arrays have consistent shapes."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     n = species_table.n_species
 
@@ -129,7 +129,7 @@ def test_array_shapes_consistency():
 
 def test_physical_constraints():
     """Test that species data satisfies physical constraints."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     # Molar masses must be positive
     if not jnp.all(species_table.molar_masses > 0):
@@ -150,7 +150,7 @@ def test_physical_constraints():
 
 def test_equilibrium_enthalpy():
     """Test equilibrium enthalpy function."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     T = jnp.array([300.0, 1000.0, 5000.0, 10000.0])
     h = thermodynamic_relations.compute_equilibrium_enthalpy(T, species_table)
@@ -179,7 +179,7 @@ def test_equilibrium_enthalpy():
 
 def test_cp():
     """Test specific heat at constant pressure function."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     T = jnp.array([300.0, 1000.0, 5000.0, 10000.0])
     cp = thermodynamic_relations.compute_cp(T, species_table)
@@ -224,7 +224,7 @@ def test_cp():
 
 def test_cv_tr():
     """Test translational-rotational specific heat function."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     T = jnp.array([300.0, 1000.0, 5000.0])
     cv_tr = thermodynamic_relations.compute_cv_tr(T, species_table)
@@ -268,7 +268,7 @@ def test_cv_tr():
 
 def test_e_ve():
     """Test vibrational-electronic energy function."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     T_V = jnp.array([300.0, 1000.0, 5000.0, 10000.0])
     e_vib = thermodynamic_relations.compute_e_ve(T_V, species_table)

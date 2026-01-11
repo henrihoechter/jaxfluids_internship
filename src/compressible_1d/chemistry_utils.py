@@ -1,108 +1,50 @@
 import json
 from pathlib import Path
-from typing import List
+from typing import Sequence
 import jax.numpy as jnp
 from jaxtyping import Float, Array
 
 
-from compressible_1d.chemistry_types import Species, SpeciesTable
-from compressible_1d import constants
+from compressible_1d.chemistry_types import SpeciesTable
+from compressible_1d import constants, energy_models
 
 
-def load_species_from_gnoffo(
-    general_data_path: str, equilibrium_enthalpy: str
-) -> List[Species]:
-    """Load species data including characteristic temperatures.
+def _load_molar_mass(entry: dict) -> float:
+    """Convert molar mass from amu to kg/mol."""
+    return entry["molar_mass"] / 1000.0  # amu -> kg/mol
 
-    Extended to load:
-    - Enthalpy polynomial fits (existing)
-    - Characteristic temperatures theta_v, theta_rot (new - from general_data JSON)
 
-    Format description `general_data_path`
-    {
-        "name": string,
-        "charge": float  # charge in elementary charge units
-        "molar_mass": float,  # relative atomic mass in amu
-        "h_s0": float,  # standard enthalpy of formation at 0 K in J/g/mol
-        "ionization_energy": float | None,  # ionization energy in eV, None for
-            ionized species
-        "dissociation_energy": float | None,  # dissociation energy in eV, None for
-            monoatomic species
-        "vibrational_relaxation_factor": float | None  # vibrational relaxation factor,
-            None for monoatomic species
-        "theta_v": float  # vibrational characteristic temperature [K], 0.0 for atoms
-        "theta_rot": float  # rotational characteristic temperature [K], 0.0 for atoms
-    }
+def _load_h_s0(entry: dict) -> float:
+    """Convert h_s0 from kcal/mol to J/kg."""
+    kcal_per_mol = entry["h_s0"]
+    J_per_mol = kcal_per_mol * 4184.0  # kcal/mol → J/mol
+    M_s = _load_molar_mass(entry)  # kg/mol
+    J_per_kg = J_per_mol / M_s
+    return J_per_kg
 
-    Format description `equilibrium_enthaply`
 
-    Note:
-        - NO separate C_p curve fits needed!
-        - C_p computed via dh/dT from enthalpy polynomial
-    """
+def _load_dissociation_energy(entry: dict) -> float | None:
+    """Convert dissociation energy from eV to J."""
+    if entry.get("dissociation_energy") is not None:
+        return entry["dissociation_energy"] * constants.e
+    return None
 
-    def _load_molar_mass(entry: dict) -> float:
-        """Convert molar mass from amu to kg/mol."""
-        return entry["molar_mass"] / 1000.0  # amu -> kg/mol
 
-    def _load_h_s0(entry: dict) -> float:
-        """Convert h_s0 from kcal/mol to J/kg.
+def _load_ionization_energy(entry: dict) -> float | None:
+    """Convert ionization energy from eV to J."""
+    if entry.get("ionization_energy") is not None:
+        return entry["ionization_energy"] * constants.e
+    return None
 
-        The JSON contains h_s0 in kcal/g-mole (kcal/mol).
-        Conversion: kcal/mol → J/kg
-          1. kcal → J: multiply by 4184 J/kcal
-          2. /mol → /kg: divide by molar_mass [kg/mol]
-        """
-        kcal_per_mol = entry["h_s0"]
-        J_per_mol = kcal_per_mol * 4184.0  # kcal/mol → J/mol
-        M_s = _load_molar_mass(entry)  # kg/mol
-        J_per_kg = J_per_mol / M_s
-        return J_per_kg
 
-    def _load_dissociation_energy(entry: dict) -> float | None:
-        """Convert dissociation energy from eV to J."""
-        if entry.get("dissociation_energy") is not None:
-            return entry["dissociation_energy"] * constants.e
-        else:
-            return None
-
-    def _load_ionization_energy(entry: dict) -> float | None:
-        """Convert ionization energy from eV to J."""
-        if entry.get("ionization_energy") is not None:
-            return entry["ionization_energy"] * constants.e
-        else:
-            return None
-
-    general_data_path = Path(general_data_path)
-
-    with general_data_path.open("r", encoding="utf-8") as f:
-        raw_data = json.load(f)
-
-    species_list: List[Species] = []
-
-    for entry in raw_data:
-        T_limit_low, T_limit_high, parameters = load_equilibrium_enthalpy_curve_fits(
-            json_path=equilibrium_enthalpy, species_name=entry["name"]
-        )
-
-        species = Species(
-            name=entry["name"],
-            molar_mass=_load_molar_mass(entry),
-            h_s0=_load_h_s0(entry),
-            T_limit_low=T_limit_low,
-            T_limit_high=T_limit_high,
-            parameters=parameters,
-            dissociation_energy=_load_dissociation_energy(entry),
-            ionization_energy=_load_ionization_energy(entry),
-            vibrational_relaxation_factor=entry.get("vibrational_relaxation_factor"),
-            charge=entry.get("charge", 0),
-            sigma_es_a=entry.get("sigma_es_a"),
-            sigma_es_b=entry.get("sigma_es_b"),
-            sigma_es_c=entry.get("sigma_es_c"),
-        )
-        species_list.append(species)
-
-    return species_list
+def _select_species_entries(
+    raw_data: list[dict], species_names: Sequence[str]
+) -> list[dict]:
+    entries = {entry["name"]: entry for entry in raw_data}
+    missing = [name for name in species_names if name not in entries]
+    if missing:
+        raise ValueError(f"Species not found in data: {missing}")
+    return [entries[name] for name in species_names]
 
 
 def load_equilibrium_enthalpy_curve_fits(
@@ -147,20 +89,107 @@ def load_equilibrium_enthalpy_curve_fits(
     return T_limit_low, T_limit_high, parameters
 
 
-def load_species_table_from_gnoffo(
-    general_data_path: str, equilibrium_enthalpy: str
+def load_species_table(
+    species_names: Sequence[str],
+    general_data_path: str,
+    energy_model_config: energy_models.EnergyModelConfig,
 ) -> SpeciesTable:
     """Load species data and return as SpeciesTable.
-
-    Convenience wrapper around load_species_from_gnoffo that returns
-    a vectorized SpeciesTable for efficient JAX operations.
 
     Args:
         general_data_path: Path to JSON file with general species data
         equilibrium_enthalpy: Path to JSON file with enthalpy curve fits
+        species_names: Names of species to load (defaults to all)
+        energy_model_config: Energy model configuration (data_path selects model data)
 
     Returns:
         SpeciesTable with all data as vectorized arrays
     """
-    species_list = load_species_from_gnoffo(general_data_path, equilibrium_enthalpy)
-    return SpeciesTable.from_species_list(species_list)
+    general_data_path = Path(general_data_path)
+    with general_data_path.open("r", encoding="utf-8") as f:
+        raw_data = json.load(f)
+
+    if species_names is None:
+        species_names = [entry["name"] for entry in raw_data]
+    if not species_names:
+        raise ValueError("species_names cannot be empty.")
+
+    selected_entries = _select_species_entries(raw_data, species_names)
+
+    names = []
+    molar_masses = []
+    h_s0_array = []
+    dissociation_energy = []
+    ionization_energy = []
+    vibrational_relaxation_factor = []
+    charge = []
+    sigma_es_a = []
+    sigma_es_b = []
+    sigma_es_c = []
+
+    for entry in selected_entries:
+        names.append(entry["name"])
+        molar_masses.append(_load_molar_mass(entry))
+        h_s0_array.append(_load_h_s0(entry))
+        dissociation_energy_value = _load_dissociation_energy(entry)
+        ionization_energy_value = _load_ionization_energy(entry)
+        vibrational_relaxation_value = entry.get("vibrational_relaxation_factor")
+        sigma_es_a_value = entry.get("sigma_es_a")
+        sigma_es_b_value = entry.get("sigma_es_b")
+        sigma_es_c_value = entry.get("sigma_es_c")
+
+        dissociation_energy.append(
+            dissociation_energy_value
+            if dissociation_energy_value is not None
+            else jnp.nan
+        )
+        ionization_energy.append(
+            ionization_energy_value if ionization_energy_value is not None else jnp.nan
+        )
+        vibrational_relaxation_factor.append(
+            vibrational_relaxation_value
+            if vibrational_relaxation_value is not None
+            else jnp.nan
+        )
+        charge.append(entry.get("charge", 0))
+        sigma_es_a.append(sigma_es_a_value if sigma_es_a_value is not None else jnp.nan)
+        sigma_es_b.append(sigma_es_b_value if sigma_es_b_value is not None else jnp.nan)
+        sigma_es_c.append(sigma_es_c_value if sigma_es_c_value is not None else jnp.nan)
+
+    names_tuple = tuple(names)
+    molar_masses = jnp.array(molar_masses)
+    h_s0_array = jnp.array(h_s0_array)
+    dissociation_energy = jnp.array(dissociation_energy)
+    ionization_energy = jnp.array(ionization_energy)
+    vibrational_relaxation_factor = jnp.array(vibrational_relaxation_factor)
+    charge = jnp.array(charge)
+    sigma_es_a = jnp.array(sigma_es_a)
+    sigma_es_b = jnp.array(sigma_es_b)
+    sigma_es_c = jnp.array(sigma_es_c)
+
+    is_monoatomic = ~jnp.isfinite(dissociation_energy)
+    T_ref = 298.16
+
+    energy_model = energy_models.build_energy_model_from_config(
+        energy_model_config,
+        species_names=names_tuple,
+        T_ref=T_ref,
+        is_monoatomic=is_monoatomic,
+        molar_masses=molar_masses,
+    )
+
+    return SpeciesTable(
+        names=names_tuple,
+        molar_masses=molar_masses,
+        h_s0=h_s0_array,
+        dissociation_energy=dissociation_energy,
+        ionization_energy=ionization_energy,
+        vibrational_relaxation_factor=vibrational_relaxation_factor,
+        charge=charge,
+        sigma_es_a=sigma_es_a,
+        sigma_es_b=sigma_es_b,
+        sigma_es_c=sigma_es_c,
+        is_monoatomic=is_monoatomic,
+        T_ref=T_ref,
+        energy_model=energy_model,
+    )

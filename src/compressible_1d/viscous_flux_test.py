@@ -13,7 +13,7 @@ from compressible_1d import transport
 from compressible_1d import equation_manager
 from compressible_1d import equation_manager_types
 from compressible_1d import numerics_types
-from compressible_1d.chemistry_utils import load_species_table_from_gnoffo
+from compressible_1d.chemistry_utils import load_species_table
 
 # Configure JAX for testing
 jax.config.update("jax_enable_x64", True)
@@ -28,7 +28,7 @@ COLLISION_INTEGRALS_FILE = str(DATA_DIR / "collision_integrals_tp2867.json")
 @pytest.fixture
 def species_table():
     """Load species table for testing."""
-    return load_species_table_from_gnoffo(GENERAL_DATA, ENTHALPY_DATA)
+    return load_species_table(GENERAL_DATA, ENTHALPY_DATA)
 
 
 @pytest.fixture

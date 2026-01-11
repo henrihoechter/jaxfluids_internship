@@ -370,16 +370,39 @@ def compute_e_vibrational_from_harmonic_oscillator(
     characteristic_temperature: Float[Array, " n_species"],
     M: Float[Array, " n_species"],
 ) -> Float[Array, "n_species N"]:
-    # TODO: this interface is not useful. ideally the characteristic_temperature was
-    # obtained from the species_table
-    R = constants.R_universal
+    """Compute vibrational energy for all species using a harmonic oscillator model."""
+    # TODO(hhoechter): ideally characteristic_temperature should come from SpeciesTable
+    T = jnp.atleast_1d(T_V)
+    T_safe = jnp.maximum(T, 1e-12)
+    theta = characteristic_temperature[:, None]
+    R_over_M = constants.R_universal / M
 
-    return (
-        R
-        / M
-        * characteristic_temperature
-        / (jnp.exp(characteristic_temperature / T_V) - 1.0)
-    )
+    x = theta / T_safe[None, :]
+    denom = jnp.expm1(x)
+    denom_safe = jnp.where(denom == 0.0, 1.0, denom)
+
+    e_vib = R_over_M[:, None] * theta / denom_safe
+    return jnp.where(theta == 0.0, 0.0, e_vib)
+
+
+def compute_cv_vibrational_from_harmonic_oscillator(
+    T_V: Float[Array, " N"],
+    characteristic_temperature: Float[Array, " n_species"],
+    M: Float[Array, " n_species"],
+) -> Float[Array, "n_species N"]:
+    """Compute vibrational specific heat for a harmonic oscillator model."""
+    T = jnp.atleast_1d(T_V)
+    T_safe = jnp.maximum(T, 1e-12)
+    theta = characteristic_temperature[:, None]
+    R_over_M = constants.R_universal / M
+
+    x = theta / T_safe[None, :]
+    exp_x = jnp.exp(x)
+    denom = jnp.expm1(x)
+    denom_safe = jnp.where(denom == 0.0, 1.0, denom)
+
+    cv_vib = R_over_M[:, None] * x**2 * exp_x / (denom_safe**2)
+    return jnp.where(theta == 0.0, 0.0, cv_vib)
 
 
 def compute_mixture_cv_trans_rot(
@@ -477,13 +500,6 @@ def solve_vibrational_temperature_from_vibroelectric_energy(
         - Uses jax.lax.while_loop for early exit on convergence
         - Converges when |delta_T_V| < atol or |delta_T_V/T_V| < rtol for all cells
     """
-    # Extract coefficient data from species_table
-    T_ref = species_table.T_ref
-    T_limit_low = species_table.T_limit_low
-    T_limit_high = species_table.T_limit_high
-    enthalpy_coeffs = species_table.enthalpy_coeffs
-    is_monoatomic = species_table.is_monoatomic
-    molar_masses = species_table.molar_masses
 
     def _compute_residual_and_jacobian(
         T_V: Float[Array, " N"],
@@ -494,26 +510,9 @@ def solve_vibrational_temperature_from_vibroelectric_energy(
             residual: f(T_V) = sum_s c_s e_{v,s}(T_V) - e_V_target, shape (N,)
             jacobian: df/dT_V = sum_s c_s C_{v,V}^s(T_V), shape (N,)
         """
-        # Compute e_v for all species at T_V: shape (n_species, N)
-        e_v_species = compute_e_vib_electronic(
-            T_V,
-            T_ref,
-            T_limit_low,
-            T_limit_high,
-            enthalpy_coeffs,
-            is_monoatomic,
-            molar_masses,
-        )
-
-        # Compute C_{v,V} for all species at T_V: shape (n_species, N)
-        cv_v_species = compute_cv_vib_electronic(
-            T_V,
-            T_limit_low,
-            T_limit_high,
-            enthalpy_coeffs,
-            is_monoatomic,
-            molar_masses,
-        )
+        # Compute e_v and C_{v,V} for all species at T_V: shape (n_species, N)
+        e_v_species = compute_e_ve(T_V, species_table)
+        cv_v_species = compute_cv_ve(T_V, species_table)
 
         # Mixture vibrational energy: sum_s c_s e_{v,s}(T_V)
         e_V_computed = jnp.sum(c_s * e_v_species, axis=0)  # shape (N,)
@@ -650,18 +649,12 @@ def compute_cp(
 
     Args:
         T: Temperature array [K], shape (N,)
-        species_table: SpeciesTable containing coefficient data
+        species_table: SpeciesTable containing energy model cp callable
 
     Returns:
         C_p [J/(kg·K)] for all species, shape (n_species, N)
     """
-    return compute_cp_from_polynomial(
-        T,
-        species_table.T_limit_low,
-        species_table.T_limit_high,
-        species_table.enthalpy_coeffs,
-        species_table.molar_masses,
-    )
+    return species_table.energy_model.cp(T)
 
 
 def compute_cv_tr(
@@ -697,14 +690,7 @@ def compute_cv_ve(
     Returns:
         C_v,V [J/(kg·K)] for all species, shape (n_species, N)
     """
-    return compute_cv_vib_electronic(
-        T_V,
-        species_table.T_limit_low,
-        species_table.T_limit_high,
-        species_table.enthalpy_coeffs,
-        species_table.is_monoatomic,
-        species_table.molar_masses,
-    )
+    return species_table.energy_model.cv_ve(T_V)
 
 
 def compute_e_ve(
@@ -720,15 +706,23 @@ def compute_e_ve(
     Returns:
         e_v [J/kg] for all species, shape (n_species, N)
     """
-    return compute_e_vib_electronic(
-        T_V,
-        species_table.T_ref,
-        species_table.T_limit_low,
-        species_table.T_limit_high,
-        species_table.enthalpy_coeffs,
-        species_table.is_monoatomic,
-        species_table.molar_masses,
-    )
+    return species_table.energy_model.e_ve(T_V)
+
+
+def compute_e_vib(
+    T_V: Float[Array, " N"],
+    species_table: "SpeciesTable",
+) -> Float[Array, "n_species N"]:
+    """Compute vibrational internal energy for all species."""
+    return species_table.energy_model.e_vib(T_V)
+
+
+def compute_e_el(
+    T_V: Float[Array, " N"],
+    species_table: "SpeciesTable",
+) -> Float[Array, "n_species N"]:
+    """Compute electronic internal energy for all species."""
+    return species_table.energy_model.e_el(T_V)
 
 
 def compute_electronic_energy_from_levels(
@@ -774,3 +768,70 @@ def compute_electronic_energy_from_levels(
 
     # e_el = R_s * numerator / Z
     return R_s * numerator / jnp.clip(Z, 1e-300, None)
+
+
+def compute_electronic_energy_from_levels_batched(
+    T_el: Float[Array, " N"],
+    g_i: Float[Array, "n_species n_levels"],
+    theta_el_i: Float[Array, "n_species n_levels"],
+    molar_masses: Float[Array, " n_species"],
+) -> Float[Array, "n_species N"]:
+    """Compute electronic energy for all species using padded electronic levels."""
+    R_s = constants.R_universal / molar_masses
+
+    def _single_species(
+        g: Float[Array, " n_levels"],
+        theta: Float[Array, " n_levels"],
+        R: float,
+    ) -> Float[Array, " N"]:
+        return compute_electronic_energy_from_levels(T_el, g, theta, R)
+
+    return jax.vmap(_single_species, in_axes=(0, 0, 0))(g_i, theta_el_i, R_s)
+
+
+def compute_cv_electronic_from_levels(
+    T_el: Float[Array, " N"],
+    g_i: Float[Array, " n_levels"],
+    theta_el_i: Float[Array, " n_levels"],
+    R_s: float | jnp.ndarray,
+) -> Float[Array, " N"]:
+    """Compute electronic specific heat from discrete electronic levels."""
+    T_el = jnp.asarray(T_el)
+    T_safe = jnp.maximum(T_el, 1e-12)
+
+    theta = theta_el_i[:, None] if T_el.ndim > 0 else theta_el_i
+    g = g_i[:, None] if T_el.ndim > 0 else g_i
+
+    w = g * jnp.exp(-theta / T_safe)
+    Z = jnp.sum(w, axis=0)
+
+    # U = sum_i g_i * theta_i * exp(-theta_i/T) (ground state theta=0 is fine)
+    U = jnp.sum(w * theta, axis=0)
+
+    # Derivatives w.r.t T: d/dT exp(-theta/T) = exp(-theta/T) * theta / T^2
+    T_inv2 = 1.0 / (T_safe**2)
+    Z_prime = jnp.sum(w * theta, axis=0) * T_inv2
+    U_prime = jnp.sum(w * theta**2, axis=0) * T_inv2
+
+    # d(U/Z)/dT = (U' Z - U Z') / Z^2
+    Z_safe = jnp.clip(Z, 1e-300, None)
+    return R_s * (U_prime * Z_safe - U * Z_prime) / (Z_safe**2)
+
+
+def compute_cv_electronic_from_levels_batched(
+    T_el: Float[Array, " N"],
+    g_i: Float[Array, "n_species n_levels"],
+    theta_el_i: Float[Array, "n_species n_levels"],
+    molar_masses: Float[Array, " n_species"],
+) -> Float[Array, "n_species N"]:
+    """Compute electronic specific heat for all species using padded levels."""
+    R_s = constants.R_universal / molar_masses
+
+    def _single_species(
+        g: Float[Array, " n_levels"],
+        theta: Float[Array, " n_levels"],
+        R: float,
+    ) -> Float[Array, " N"]:
+        return compute_cv_electronic_from_levels(T_el, g, theta, R)
+
+    return jax.vmap(_single_species, in_axes=(0, 0, 0))(g_i, theta_el_i, R_s)

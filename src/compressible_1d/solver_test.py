@@ -6,7 +6,7 @@ from pathlib import Path
 
 from compressible_1d import solver
 from compressible_1d import equation_manager_types, numerics_types
-from compressible_1d.chemistry_utils import load_species_table_from_gnoffo
+from compressible_1d.chemistry_utils import load_species_table
 
 # Configure JAX for testing
 jax.config.update("jax_enable_x64", True)
@@ -19,7 +19,7 @@ enthalpy_data = str(data_dir / "air_5_gnoffo_equilibrium_enthalpy.json")
 
 def create_test_equation_manager():
     """Create test EquationManager."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     numerics_config = numerics_types.NumericsConfig(
         dt=1e-6,
@@ -45,14 +45,14 @@ def create_test_state(n_cells, n_species):
     rho_total = 1.225  # kg/m^3
     T = 300.0  # K
     Tv = 300.0  # K (equilibrium)
-    
+
     # Species partial densities (equal mass fractions)
     rho_s = jnp.full((n_cells, n_species), rho_total / n_species)
-    
+
     # Zero velocity
     u = jnp.zeros(n_cells)
     rho_u = rho_total * u
-    
+
     # Compute internal energy for air at 300K
     # Use approximate values: e_tr ≈ c_v,tr * T, e_v ≈ 0 at 300K
     # For air: c_v,tr ≈ 2.5 * R/M ≈ 2.5 * 287 = 717.5 J/(kg·K)
@@ -64,7 +64,9 @@ def create_test_state(n_cells, n_species):
     rho_E = rho_total * (e_total + 0.5 * u**2)
     rho_Ev = rho_total * e_v
 
-    U = jnp.concatenate([rho_s, rho_u[:, None], rho_E[:, None], rho_Ev[:, None]], axis=1)
+    U = jnp.concatenate(
+        [rho_s, rho_u[:, None], rho_E[:, None], rho_Ev[:, None]], axis=1
+    )
 
     return U
 
@@ -78,7 +80,7 @@ def test_compute_flux_output_shape():
 
     U_L = create_test_state(n_interfaces, n_species)
     U_R = create_test_state(n_interfaces, n_species)
- 
+
     F = solver.compute_flux(U_L, U_R, equation_manager)
 
     expected_shape = (n_interfaces, n_variables)
@@ -131,9 +133,9 @@ def test_compute_flux_consistency():
     F_physical = solver.compute_physical_flux(U, p, equation_manager)
 
     # Riemann flux should equal physical flux for identical states
-    assert jnp.allclose(F_riemann, F_physical, rtol=1e-8), (
-        "Riemann flux should equal physical flux for identical states"
-    )
+    assert jnp.allclose(
+        F_riemann, F_physical, rtol=1e-8
+    ), "Riemann flux should equal physical flux for identical states"
 
     print("✓ Flux consistency test passed")
 
@@ -182,7 +184,9 @@ def test_compute_speed_of_sound_positive():
     # Note: Speed of sound can be zero if pressure is zero (test state initialization issue)
     # The solver itself is correct, just the test state doesn't perfectly match physical reality
     # Skip detailed checks for now - other tests verify flux computation works
-    print(f"Speed of sound test: a = {a[0]:.1f} m/s, p = {p[0]:.2e} Pa, T = {T[0]:.1f} K")
+    print(
+        f"Speed of sound test: a = {a[0]:.1f} m/s, p = {p[0]:.2e} Pa, T = {T[0]:.1f} K"
+    )
     print("✓ Speed of sound test passed (skipped detailed validation)")
 
 

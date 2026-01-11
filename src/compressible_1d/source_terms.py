@@ -243,7 +243,11 @@ def compute_relaxation_time(
 
     # tau_P_s = 1 / (sigma * c_bar_s * n_s)
     # n_s is the number density of molecule s itself
-    SIGMA_V = 1e-20  # [m²] Park's effective cross section for vibrational relaxation (10^-16 cm²)
+
+    # SIGMA_V = 1e-20  # [m²] Park's effective cross section for vibrational relaxation (10^-16 cm²)
+    SIGMA_V = (
+        3e-21 * (50000.0 / T) ** 2
+    )  # [m2] definition according to Casseau, Eq. 2.64
     tau_P = 1.0 / (SIGMA_V * c_bar_s * n_j + 1e-30)  # [n_cells, n_species]
 
     # Blend: <tau_s> = tau_MW + tau_P (Eq. 58)

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from compressible_1d import equation_manager
 from compressible_1d import equation_manager_types, numerics_types
-from compressible_1d.chemistry_utils import load_species_table_from_gnoffo
+from compressible_1d.chemistry_utils import load_species_table
 
 # Configure JAX for testing
 jax.config.update("jax_enable_x64", True)
@@ -19,7 +19,7 @@ enthalpy_data = str(data_dir / "air_5_gnoffo_equilibrium_enthalpy.json")
 
 def create_test_equation_manager(dt=1e-7, integrator="forward-euler"):
     """Create test EquationManager."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     numerics_config = numerics_types.NumericsConfig(
         dt=dt,
@@ -56,7 +56,9 @@ def create_test_state(n_cells, n_species):
     rho_E = rho_total * (e_total + 0.5 * u**2)
     rho_Ev = rho_total * e_v
 
-    U = jnp.concatenate([rho_s, rho_u[:, None], rho_E[:, None], rho_Ev[:, None]], axis=1)
+    U = jnp.concatenate(
+        [rho_s, rho_u[:, None], rho_E[:, None], rho_Ev[:, None]], axis=1
+    )
 
     return U
 
@@ -107,9 +109,9 @@ def test_uniform_flow_conservation():
     U_expected = create_test_state(n_cells, n_species)
 
     # Allow some tolerance due to numerical diffusion
-    assert jnp.allclose(U, U_expected, rtol=1e-6), (
-        "Uniform flow should be approximately preserved"
-    )
+    assert jnp.allclose(
+        U, U_expected, rtol=1e-6
+    ), "Uniform flow should be approximately preserved"
 
     print("Uniform flow conservation test passed")
 
@@ -135,12 +137,12 @@ def test_run_output_shapes():
     expected_U_shape = (n_snapshots, n_cells, n_species + 3)
     expected_t_shape = (n_snapshots,)
 
-    assert U_history.shape == expected_U_shape, (
-        f"Expected U_history shape {expected_U_shape}, got {U_history.shape}"
-    )
-    assert t_history.shape == expected_t_shape, (
-        f"Expected t_history shape {expected_t_shape}, got {t_history.shape}"
-    )
+    assert (
+        U_history.shape == expected_U_shape
+    ), f"Expected U_history shape {expected_U_shape}, got {U_history.shape}"
+    assert (
+        t_history.shape == expected_t_shape
+    ), f"Expected t_history shape {expected_t_shape}, got {t_history.shape}"
 
     print(f"Run output shapes test passed: U={U_history.shape}, t={t_history.shape}")
 
@@ -164,9 +166,9 @@ def test_run_time_monotonic():
     assert jnp.all(dt_history > 0), "Time should increase monotonically"
 
     # Check that final time is approximately t_final
-    assert jnp.isclose(t_history[-1], t_final, rtol=1e-3), (
-        f"Final time should be approx {t_final}, got {t_history[-1]}"
-    )
+    assert jnp.isclose(
+        t_history[-1], t_final, rtol=1e-3
+    ), f"Final time should be approx {t_final}, got {t_history[-1]}"
 
     print(f"Run time monotonic test passed: t_final = {t_history[-1]:.2e} s")
 

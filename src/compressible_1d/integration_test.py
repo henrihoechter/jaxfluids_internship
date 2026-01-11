@@ -7,7 +7,7 @@ from pathlib import Path
 from compressible_1d import equation_manager_utils
 from compressible_1d import equation_manager_types
 from compressible_1d import numerics_types
-from compressible_1d.chemistry_utils import load_species_table_from_gnoffo
+from compressible_1d.chemistry_utils import load_species_table
 from compressible_1d import constants
 from compressible_1d import thermodynamic_relations
 
@@ -26,7 +26,7 @@ def test_full_workflow_species_table_to_primitives():
 
     # 1. Load species data
     print("Loading species data...")
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
     print(f"  Loaded {species_table.n_species} species: {species_table.names}")
 
     # 2. Create equation manager
@@ -127,7 +127,7 @@ def test_jax_jit_compilation():
     """Test that all key functions can be JIT compiled."""
     print("\n=== JAX JIT Compilation Test ===")
 
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     # Test JIT compilation of thermodynamic functions
     @jax.jit
@@ -162,7 +162,7 @@ def test_jax_vmap_compatibility():
     """Test that functions can be vmapped over batch dimension."""
     print("\n=== JAX vmap Compatibility Test ===")
 
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     # Create batch of temperature arrays
     batch_size = 5
@@ -204,7 +204,7 @@ def test_thermodynamic_consistency():
     """Test thermodynamic relationships across modules."""
     print("\n=== Thermodynamic Consistency Test ===")
 
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     # Test 1: C_p = dh/dT relationship
     print("Testing C_p = dh/dT...")
@@ -260,7 +260,7 @@ def test_property_consistency():
     """Test consistency of SpeciesTable properties."""
     print("\n=== Property Consistency Test ===")
 
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     # Test: is_monoatomic should be inverse of has_dissociation_energy
     is_mono = species_table.is_monoatomic

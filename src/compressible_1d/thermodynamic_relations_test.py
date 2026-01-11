@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from pathlib import Path
 
 from compressible_1d import thermodynamic_relations
-from compressible_1d.chemistry_utils import load_species_table_from_gnoffo
+from compressible_1d.chemistry_utils import load_species_table
 from compressible_1d import constants
 
 # Configure JAX for testing
@@ -19,7 +19,7 @@ enthalpy_data = str(data_dir / "air_5_gnoffo_equilibrium_enthalpy.json")
 
 def test_compute_equilibrium_enthalpy_polynomial_shape():
     """Test output shape of equilibrium enthalpy computation."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     T = jnp.array([300.0, 1000.0, 5000.0, 10000.0])
     h = thermodynamic_relations.compute_equilibrium_enthalpy(T, species_table)
@@ -33,7 +33,7 @@ def test_compute_equilibrium_enthalpy_polynomial_shape():
 
 def test_compute_equilibrium_enthalpy_polynomial_monotonic():
     """Test that enthalpy increases monotonically with temperature."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     T = jnp.linspace(300.0, 10000.0, 50)
     h = thermodynamic_relations.compute_equilibrium_enthalpy(T, species_table)
@@ -51,7 +51,7 @@ def test_compute_equilibrium_enthalpy_polynomial_monotonic():
 
 def test_compute_cp_equilibrium_polynomial_shape():
     """Test output shape of C_p computation."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     T = jnp.array([300.0, 1000.0, 5000.0])
     cp = thermodynamic_relations.compute_cp(T, species_table)
@@ -65,7 +65,7 @@ def test_compute_cp_equilibrium_polynomial_shape():
 
 def test_compute_cp_equilibrium_polynomial_positive():
     """Test that C_p is positive at all temperatures."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     # Use valid temperature range (data starts at 300K)
     T = jnp.linspace(300.0, 20000.0, 100)
@@ -79,7 +79,7 @@ def test_compute_cp_equilibrium_polynomial_positive():
 
 def test_compute_cp_equilibrium_polynomial_derivative_relationship():
     """Test that C_p = dh/dT using JAX automatic differentiation."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     def h_function(T_scalar):
         """Wrapper for computing enthalpy at a single temperature."""
@@ -108,7 +108,7 @@ def test_compute_cp_equilibrium_polynomial_derivative_relationship():
 
 def test_compute_cv_trans_rot_atoms_vs_molecules():
     """Test that C_v,tr has correct values for atoms vs molecules."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     T = jnp.array([1000.0])
     cv_tr = thermodynamic_relations.compute_cv_tr(T, species_table)
@@ -146,7 +146,7 @@ def test_compute_cv_trans_rot_atoms_vs_molecules():
 
 def test_compute_cv_trans_rot_temperature_independence():
     """Test that C_v,tr is constant across all temperatures."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     T1 = jnp.array([300.0, 1000.0, 5000.0])
     T2 = jnp.array([500.0, 2000.0, 8000.0, 15000.0])
@@ -173,7 +173,7 @@ def test_compute_cv_trans_rot_temperature_independence():
 
 def test_compute_cv_trans_rot_with_is_monoatomic_mask():
     """Test that compute_cv_tr works correctly."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     T = jnp.array([1000.0])
 
@@ -194,7 +194,7 @@ def test_compute_cv_trans_rot_with_is_monoatomic_mask():
 
 def test_compute_e_vib_electronic_monotonic():
     """Test that vibrational energy increases with temperature for molecules."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     T_V = jnp.linspace(300.0, 10000.0, 50)
     e_vib = thermodynamic_relations.compute_e_ve(T_V, species_table)
@@ -213,7 +213,7 @@ def test_compute_e_vib_electronic_monotonic():
 
 def test_solve_vibrational_temperature_convergence():
     """Test that T_V solver converges to correct value."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     # Create a target state
     T_V_target = jnp.array([1000.0, 3000.0, 8000.0])
@@ -262,7 +262,7 @@ def test_solve_vibrational_temperature_convergence():
 
 def test_solve_T_from_internal_energy_consistency():
     """Test that T solver can recover known temperature."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     # Known state
     T_known = jnp.array([500.0, 2000.0, 8000.0])
@@ -320,7 +320,7 @@ def test_solve_T_from_internal_energy_consistency():
 
 def test_compute_reference_internal_energy_shape():
     """Test shape of reference internal energy computation."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     e_s0 = thermodynamic_relations.compute_reference_internal_energy(
         h_s0=species_table.h_s0,
@@ -337,7 +337,7 @@ def test_compute_reference_internal_energy_shape():
 
 def test_compute_reference_internal_energy_relationship():
     """Test e_s0 = h_s0 - R*T_ref/M relationship."""
-    species_table = load_species_table_from_gnoffo(general_data, enthalpy_data)
+    species_table = load_species_table(general_data, enthalpy_data)
 
     T_ref = 298.16
     e_s0 = thermodynamic_relations.compute_reference_internal_energy(

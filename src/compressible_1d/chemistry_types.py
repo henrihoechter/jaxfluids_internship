@@ -1,119 +1,13 @@
+import dataclasses
 from dataclasses import dataclass, field
-
+from typing import TYPE_CHECKING
 import jax
 import jax.numpy as jnp
 import jaxtyping as jt
 from jaxtyping import Float
-from compressible_1d import constants
 
-
-def _compute_is_monoatomic(
-    dissociation_energy: Float[jt.Array, " n_species"],
-) -> Float[jt.Array, " n_species"]:
-    """Compute boolean mask indicating which species are monoatomic (atoms).
-
-    This is a local helper to avoid circular imports. The canonical version
-    is in equation_manager_utils.compute_is_monoatomic().
-
-    Args:
-        dissociation_energy: Dissociation energy array [J], NaN for atoms
-
-    Returns:
-        Boolean array where True = atom (monoatomic), False = molecule
-    """
-    return ~jnp.isfinite(dissociation_energy)
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True, slots=True)
-class Species:
-    name: str = field(metadata=dict(static=True))
-    """Name of the species."""
-    molar_mass: float
-    """Molar mass of species.
-      
-    [amu]
-    """
-    h_s0: float
-    """Enthalpy at reference state.
-    
-    [J/kg]
-    """
-    T_limit_low: Float[jt.Array, " n_ranges"]
-    T_limit_high: Float[jt.Array, " n_ranges"]
-    parameters: Float[jt.Array, "n_ranges n_parameters"]
-    """Function to compute specific enthalpy
-
-    # TODO(hhoechter): i think this is really ugly. i would love a Callable, but this
-    # seems not compatible with vmap`ing over a list of Species. This makes the 
-    # species unflexible and tailored for this specific enthalpy calculation.
-    
-    [J/kg]
-    """
-    dissociation_energy: float | None = None
-    """Dissociation energy, None for monoatomic species.
-    
-    [J]
-    """
-    ionization_energy: float | None = None
-    """Ionization energy, None for ionized species.
-    
-    [J]
-    """
-    vibrational_relaxation_factor: float | None = None
-    """Vibrational relaxation factor, None for monoatomic species.
-
-    [-]
-    """
-    charge: int = 0
-    """Charge state: -1 for electron, 0 for neutral, +1 for ion.
-
-    [-]
-    """
-    sigma_es_a: float | None = None
-    """Electron-neutral collision cross-section coefficient a.
-
-    [m²]
-    """
-    sigma_es_b: float | None = None
-    """Electron-neutral collision cross-section coefficient b.
-
-    [m²/K]
-    """
-    sigma_es_c: float | None = None
-    """Electron-neutral collision cross-section coefficient c.
-
-    [m²/K²]
-    """
-
-    def h(self, T_V: Float[jt.Array, " N"]) -> Float[jt.Array, " N"]:
-        """Compute specific enthalpy at temperature T_V."""
-
-        h_V = jnp.zeros_like(T_V)
-
-        for i in range(self.T_limit_low.shape[0]):
-            mask = (T_V >= self.T_limit_low[i]) & (T_V < self.T_limit_high[i])
-            T_range = T_V[mask]
-
-            a = self.parameters[i, :]
-
-            h_range = (
-                constants.R_universal
-                / self.molar_mass
-                * (  # this is ugly
-                    # h_range = (
-                    a[0] * T_range**1 / 1
-                    + a[1] * T_range**2 / 2
-                    + a[2] * T_range**3 / 3
-                    + a[3] * T_range**4 / 4
-                    + a[4] * T_range**5 / 5
-                    + a[5]
-                )
-            )  # [J/kg]
-
-            h_V = h_V.at[mask].set(h_range)
-
-        return h_V
+if TYPE_CHECKING:
+    from compressible_1d.energy_models import EnergyModel
 
 
 @jax.tree_util.register_dataclass
@@ -125,7 +19,8 @@ class SpeciesTable:
     Thermodynamic properties are computed via pure functions in thermodynamic_relations.py
     that take this SpeciesTable as an argument.
 
-    This design makes SpeciesTable JIT-compatible (no callables/closures).
+    This design keeps SpeciesTable JIT-compatible by storing energy model callables
+    as static fields (not traced by JAX).
     """
 
     # Basic properties [n_species]
@@ -151,11 +46,6 @@ class SpeciesTable:
     sigma_es_b: Float[jt.Array, " n_species"]  # [m²/K]
     sigma_es_c: Float[jt.Array, " n_species"]  # [m²/K²]
 
-    # Polynomial coefficient data for thermodynamic calculations
-    T_limit_low: Float[jt.Array, "n_species n_ranges"]  # [K]
-    T_limit_high: Float[jt.Array, "n_species n_ranges"]  # [K]
-    enthalpy_coeffs: Float[jt.Array, "n_species n_ranges n_coeffs"]  # NASA coeffs
-
     # Derived properties
     is_monoatomic: Float[
         jt.Array, " n_species"
@@ -163,6 +53,9 @@ class SpeciesTable:
 
     # Reference temperature for vibrational energy integration
     T_ref: float  # [K], typically 298.16
+
+    # Energy model callables (configured upfront; static for JIT)
+    energy_model: "EnergyModel" = field(metadata=dict(static=True))
 
     def __post_init__(self):
         """Validate data consistency."""
@@ -195,16 +88,6 @@ class SpeciesTable:
             n_sp,
         ), f"sigma_es_c shape {self.sigma_es_c.shape} != ({n_sp},)"
 
-        # Check shape consistency for coefficient arrays
-        assert (
-            self.T_limit_low.shape[0] == n_sp
-        ), f"T_limit_low first dim {self.T_limit_low.shape[0]} != n_species ({n_sp})"
-        assert (
-            self.T_limit_high.shape[0] == n_sp
-        ), f"T_limit_high first dim {self.T_limit_high.shape[0]} != n_species ({n_sp})"
-        assert (
-            self.enthalpy_coeffs.shape[0] == n_sp
-        ), f"enthalpy_coeffs first dim {self.enthalpy_coeffs.shape[0]} != n_species ({n_sp})"
         assert self.is_monoatomic.shape == (
             n_sp,
         ), f"is_monoatomic shape {self.is_monoatomic.shape} != ({n_sp},)"
@@ -213,10 +96,17 @@ class SpeciesTable:
         # assert jnp.all(self.molar_masses > 0), "All molar masses must be positive"
         # assert self.T_ref > 0, "T_ref must be positive"
 
+        if self.energy_model is None:
+            raise ValueError("energy_model must be configured for SpeciesTable.")
+
     @property
     def n_species(self) -> int:
         """Number of species in the table."""
         return len(self.names)
+
+    def with_energy_model(self, energy_model: "EnergyModel") -> "SpeciesTable":
+        """Return a new SpeciesTable with a different energy model."""
+        return dataclasses.replace(self, energy_model=energy_model)
 
     @property
     def M_s(self) -> Float[jt.Array, " n_species"]:
@@ -279,115 +169,6 @@ class SpeciesTable:
             raise ValueError(
                 f"Species '{name}' not found. Available species: {self.names}"
             )
-
-    @classmethod
-    def from_species_list(cls, species_list: list[Species]) -> "SpeciesTable":
-        """Construct SpeciesTable from a list of Species objects.
-
-        Args:
-            species_list: List of Species objects to vectorize
-
-        Returns:
-            SpeciesTable with all data as vectorized arrays
-
-        Raises:
-            ValueError: If species_list is empty or data is inconsistent
-        """
-        if not species_list:
-            raise ValueError("species_list cannot be empty")
-
-        n_species = len(species_list)
-
-        # Check all species have same number of temperature ranges
-        n_ranges_per_species = [s.T_limit_low.shape[0] for s in species_list]
-        if len(set(n_ranges_per_species)) != 1:
-            raise ValueError(
-                f"All species must have same number of temperature ranges. "
-                f"Found: {dict(zip([s.name for s in species_list], n_ranges_per_species))}"
-            )
-
-        # Extract names as tuple
-        names = tuple(s.name for s in species_list)
-
-        # Vectorize scalar properties
-        molar_masses = jnp.array([s.molar_mass for s in species_list])
-        h_s0_array = jnp.array([s.h_s0 for s in species_list])
-
-        # Vectorize optional properties (NaN for None)
-        dissociation_energy = jnp.array(
-            [
-                s.dissociation_energy if s.dissociation_energy is not None else jnp.nan
-                for s in species_list
-            ]
-        )
-        ionization_energy = jnp.array(
-            [
-                s.ionization_energy if s.ionization_energy is not None else jnp.nan
-                for s in species_list
-            ]
-        )
-        vibrational_relaxation_factor = jnp.array(
-            [
-                (
-                    s.vibrational_relaxation_factor
-                    if s.vibrational_relaxation_factor is not None
-                    else jnp.nan
-                )
-                for s in species_list
-            ]
-        )
-
-        # Vectorize charge (integer, no None handling needed)
-        charge = jnp.array([s.charge for s in species_list])
-
-        # Vectorize electron collision cross-section coefficients (NaN for None)
-        sigma_es_a = jnp.array(
-            [
-                s.sigma_es_a if s.sigma_es_a is not None else jnp.nan
-                for s in species_list
-            ]
-        )
-        sigma_es_b = jnp.array(
-            [
-                s.sigma_es_b if s.sigma_es_b is not None else jnp.nan
-                for s in species_list
-            ]
-        )
-        sigma_es_c = jnp.array(
-            [
-                s.sigma_es_c if s.sigma_es_c is not None else jnp.nan
-                for s in species_list
-            ]
-        )
-
-        # Stack temperature ranges and polynomial coefficients
-        T_limit_low = jnp.stack([s.T_limit_low for s in species_list], axis=0)
-        T_limit_high = jnp.stack([s.T_limit_high for s in species_list], axis=0)
-        enthalpy_coeffs = jnp.stack([s.parameters for s in species_list], axis=0)
-
-        # Compute is_monoatomic using the local helper function
-        is_monoatomic = _compute_is_monoatomic(dissociation_energy)
-
-        # Reference temperature for vibrational energy integration
-        T_ref = 298.16  # [K]
-
-        return cls(
-            names=names,
-            molar_masses=molar_masses,
-            h_s0=h_s0_array,
-            dissociation_energy=dissociation_energy,
-            ionization_energy=ionization_energy,
-            vibrational_relaxation_factor=vibrational_relaxation_factor,
-            charge=charge,
-            sigma_es_a=sigma_es_a,
-            sigma_es_b=sigma_es_b,
-            sigma_es_c=sigma_es_c,
-            T_limit_low=T_limit_low,
-            T_limit_high=T_limit_high,
-            enthalpy_coeffs=enthalpy_coeffs,
-            is_monoatomic=is_monoatomic,
-            T_ref=T_ref,
-        )
 
 
 @dataclass(frozen=True, slots=True)
