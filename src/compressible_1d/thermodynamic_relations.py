@@ -210,7 +210,7 @@ def compute_e_vib_electronic(
     """
     n_ranges = T_limit_low.shape[1]
 
-    def e_v_single_species(
+    def _e_v_single_species(
         T_low: Float[Array, " n_ranges"],
         T_high: Float[Array, " n_ranges"],
         params: Float[Array, "n_ranges n_parameters"],
@@ -230,44 +230,155 @@ def compute_e_vib_electronic(
         for i in range(n_ranges):
             mask = (T_V >= T_low[i]) & (T_V < T_high[i])
 
-            # Get enthalpy polynomial coefficients [a0, a1, a2, a3, a4, a5]
-            a = params[i, :]
+            def _cv_V_integrated(T, idx_temperature_range: int):
+                """Integrate: ∫C_{v,V} dT = b_0*T + b_1*T^2/2 + b_2*T^3/3
+                + b_3*T^4/4 + b_4*T^5/5
+                """
+                a = params[idx_temperature_range, :]
 
-            # C_p = dh/dT = (R/M) * (a0 + a1*T + a2*T^2 + a3*T^3 + a4*T^4)
-            # C_v = C_p - R/M = (R/M) * (a0 + a1*T + a2*T^2 + a3*T^3 + a4*T^4) - R/M
-            #                 = (R/M) * (a0 - 1 + a1*T + a2*T^2 + a3*T^3 + a4*T^4)
-            # C_{v,V} = C_v - C_{v,tr}
+                R_over_M = R / M
+                b_0 = R_over_M * (a[0] - 1) - cv_tr_s  # Linear term
+                b_1 = R_over_M * a[1]  # Quadratic term
+                b_2 = R_over_M * a[2]  # Cubic term
+                b_3 = R_over_M * a[3]  # Quartic term
+                b_4 = R_over_M * a[4]  # Quintic term
+                b_5 = R_over_M * a[5]  # Constant term (drops out in definite integral)
 
-            # Compute C_{v,V} polynomial coefficients
-            R_over_M = R / M
-            b_0 = R_over_M * (a[0] - 1) - cv_tr_s  # Constant term
-            b_1 = R_over_M * a[1]  # Linear term
-            b_2 = R_over_M * a[2]  # Quadratic term
-            b_3 = R_over_M * a[3]  # Cubic term
-            b_4 = R_over_M * a[4]  # Quartic term
-
-            # Integrate: ∫C_{v,V} dT = b_0*T + b_1*T^2/2 + b_2*T^3/3 + b_3*T^4/4 + b_4*T^5/5
-            def integrate_cv(T):
                 return (
                     b_0 * T
                     + b_1 * T**2 / 2
                     + b_2 * T**3 / 3
                     + b_3 * T**4 / 4
                     + b_4 * T**5 / 5
+                    + b_5
                 )
 
             # e_v = ∫_{T_ref}^{T_V} C_{v,V} dT' = F(T_V) - F(T_ref)
-            e_v_range = integrate_cv(T_V) - integrate_cv(T_ref)
+            # TODO: this is sloppy: T_ref=298K is out of the validity bound of 0th range
+            # but i still use it without checks as lower limit of 0th range is 300K
+            e_v_range = _cv_V_integrated(T_V, i) - _cv_V_integrated(T_ref, 0)
 
             e_v = jnp.where(mask, e_v_range, e_v)
 
         return e_v
 
     # Vectorize over species
-    e_v_vectorized = jax.vmap(e_v_single_species, in_axes=(0, 0, 0, 0, 0))
+    e_v_vectorized = jax.vmap(_e_v_single_species, in_axes=(0, 0, 0, 0, 0))
 
     return e_v_vectorized(
         T_limit_low, T_limit_high, parameters, is_monoatomic, molar_masses
+    )
+
+
+# def compute_e_vibrational(
+#     T_V: Float[Array, " N"],
+#     species_table: SpeciesTable,
+# ) -> Float[Array, "n_species N"]:
+#     """Compute vibrational-electronic internal energy by integrating C_{v,V}.
+
+#     Implements Gnoffo eq. 33:
+#     e_{v,s}(T_V) = ∫_{T_ref}^{T_V} C_{v,V}^s(T') dT'
+
+#     Uses analytical polynomial integration of C_{v,V} derived from enthalpy polynomials.
+
+#     Args:
+#         T_V: Vibrational temperature array [K], shape (N,)
+#         T_ref: Reference temperature [K] - passed as parameter, partialed at creation
+#         T_limit_low: Temperature range bounds [K], shape (n_species, n_ranges)
+#         T_limit_high: Temperature range bounds [K], shape (n_species, n_ranges)
+#         parameters: Enthalpy polynomial coefficients, shape (n_species, n_ranges, 6)
+#         theta_rot: Rotational characteristic temperature [K], shape (n_species,)
+#         molar_masses: Molar mass [kg/mol], shape (n_species,)
+
+#     Returns:
+#         e_v [J/kg], shape (n_species, N)
+
+#     Notes:
+#         - Integration performed analytically, not numerically
+#         - C_{v,V} derived from enthalpy polynomial (eqs. 29-31)
+#         - T_ref is passed as a parameter (not stored in SpeciesTable)
+#         - Same polynomial structure as h_equilibrium for consistency
+#     """
+#     T_ref = species_table.T_ref
+#     T_limit_high = species_table.T_limit_high
+#     T_limit_low = species_table.T_limit_low
+#     parameters = species_table.enthalpy_coeffs
+#     molar_masses = species_table.molar_masses
+#     n_ranges = T_limit_low.shape[1]
+
+#     def e_v_single_species(
+#         T_low: Float[Array, " n_ranges"],
+#         T_high: Float[Array, " n_ranges"],
+#         params: Float[Array, "n_ranges n_parameters"],
+#         M_s: float,
+#         T_ref: float,
+#     ) -> Float[Array, " N"]:
+#         """Integrate C_{v,V} for one species."""
+
+#         R = constants.R_universal
+#         M = M_s  # kg/mol
+
+#         e_v = jnp.zeros_like(T_V)
+
+#         e_v_t_ref = (
+#             R
+#             / M
+#             * (
+#                 (params[0, 0] - 1 - 2.5) * T_ref
+#                 + params[0, 1] * T_ref**2 / 2
+#                 + params[0, 2] * T_ref**3 / 3
+#                 + params[0, 3] * T_ref**4 / 4
+#                 + params[0, 4] * T_ref**5 / 5
+#                 + params[0, 5]
+#             )
+#         )
+
+#         for i in range(n_ranges):
+#             mask = (T_V >= T_low[i]) & (T_V < T_high[i])
+
+#             a = params[i, :]
+
+#             def e_v_function(T):
+#                 return (
+#                     R
+#                     / M
+#                     * (
+#                         (a[0] - 1 - 2.5) * T
+#                         + a[1] * T**2 / 2
+#                         + a[2] * T**3 / 3
+#                         + a[3] * T**4 / 4
+#                         + a[4] * T**5 / 5
+#                         + a[5]
+#                     )
+#                 )
+
+#             # e_v_range = e_v_function(T_V) - e_v_function(T_ref)
+#             e_v_range = e_v_function(T_V) - e_v_t_ref
+
+#             e_v = jnp.where(mask, e_v_range, e_v)
+
+#         return e_v
+
+#     # Vectorize over species
+#     e_v_vectorized = jax.vmap(e_v_single_species, in_axes=(0, 0, 0, 0, None))
+
+#     return e_v_vectorized(T_limit_low, T_limit_high, parameters, molar_masses, T_ref)
+
+
+def compute_e_vibrational_from_harmonic_oscillator(
+    T_V: Float[Array, " N"],
+    characteristic_temperature: Float[Array, " n_species"],
+    M: Float[Array, " n_species"],
+) -> Float[Array, "n_species N"]:
+    # TODO: this interface is not useful. ideally the characteristic_temperature was
+    # obtained from the species_table
+    R = constants.R_universal
+
+    return (
+        R
+        / M
+        * characteristic_temperature
+        / (jnp.exp(characteristic_temperature / T_V) - 1.0)
     )
 
 
@@ -325,43 +436,48 @@ def compute_reference_internal_energy(
     return e_s0
 
 
-def solve_vibrational_temperature_from_vibrational_energy(
-    e_V_target: Float[Array, "..."],
-    c_s: Float[Array, "n_species ..."],
-    T_V_initial: Float[Array, "..."],
+def solve_vibrational_temperature_from_vibroelectric_energy(
+    e_V_target: Float[Array, " N"],
+    c_s: Float[Array, "n_species N"],
+    T_V_initial: Float[Array, " N"],
     species_table: "SpeciesTable",
     max_iterations: int = 20,
     rtol: float = 1e-6,
     atol: float = 1.0,  # [K]
-) -> Float[Array, "..."]:
+) -> Float[Array, " N"]:
     """Solve for vibrational temperature T_V from vibrational energy e_V.
 
-    Implements Gnoffo step 9: Find T_V such that
-    Σ_s c_s e_{v,s}(T_V) = e_V
+    Optimized implementation using batched operations and analytical derivatives.
 
-    Uses Newton-Raphson with JAX autodiff for Jacobian:
+    Implements Gnoffo step 9: Find T_V such that
+    sum_s c_s e_{v,s}(T_V) = e_V
+
+    Uses Newton-Raphson with analytical Jacobian from C_{v,V}:
     T_V^{n+1} = T_V^n - f(T_V^n) / f'(T_V^n)
 
-    where f(T_V) = Σ_s c_s e_{v,s}(T_V) - e_V
+    where:
+        f(T_V) = sum_s c_s e_{v,s}(T_V) - e_V
+        f'(T_V) = sum_s c_s C_{v,V}^s(T_V)  (analytical derivative)
 
     Args:
-        e_V_target: Target vibrational energy [J/kg], shape (...)
-        c_s: Mass fractions, shape (n_species, ...)
-        T_V_initial: Initial guess for T_V [K], shape (...)
+        e_V_target: Target vibrational energy [J/kg], shape (N,)
+        c_s: Mass fractions, shape (n_species, N)
+        T_V_initial: Initial guess for T_V [K], shape (N,)
         species_table: SpeciesTable containing thermodynamic data
-        max_iterations: Maximum Newton iterations
+        max_iterations: Maximum Newton iterations (default 20)
         rtol: Relative tolerance for convergence
         atol: Absolute tolerance [K] for temperature convergence
 
     Returns:
-        T_V [K], shape (...)
+        T_V [K], shape (N,)
 
     Notes:
-        - Uses JAX autodiff to compute df/dT_V automatically
-        - Converges when |ΔT_V| < atol or |ΔT_V/T_V| < rtol
-        - If species have no vibrational modes (e_v = 0), returns T_V_initial
+        - Uses analytical derivative C_{v,V} instead of autodiff
+        - Fully batched across all cells (no per-cell vmap)
+        - Uses jax.lax.while_loop for early exit on convergence
+        - Converges when |delta_T_V| < atol or |delta_T_V/T_V| < rtol for all cells
     """
-    # Extract coefficient data from species_table for use in nested functions
+    # Extract coefficient data from species_table
     T_ref = species_table.T_ref
     T_limit_low = species_table.T_limit_low
     T_limit_high = species_table.T_limit_high
@@ -369,9 +485,17 @@ def solve_vibrational_temperature_from_vibrational_energy(
     is_monoatomic = species_table.is_monoatomic
     molar_masses = species_table.molar_masses
 
-    def compute_e_v_internal(T_V: Float[Array, " N"]) -> Float[Array, "n_species N"]:
-        """Compute vibrational energy using extracted coefficient data."""
-        return compute_e_vib_electronic(
+    def _compute_residual_and_jacobian(
+        T_V: Float[Array, " N"],
+    ) -> tuple[Float[Array, " N"], Float[Array, " N"]]:
+        """Compute residual f(T_V) and Jacobian df/dT_V for all cells.
+
+        Returns:
+            residual: f(T_V) = sum_s c_s e_{v,s}(T_V) - e_V_target, shape (N,)
+            jacobian: df/dT_V = sum_s c_s C_{v,V}^s(T_V), shape (N,)
+        """
+        # Compute e_v for all species at T_V: shape (n_species, N)
+        e_v_species = compute_e_vib_electronic(
             T_V,
             T_ref,
             T_limit_low,
@@ -381,65 +505,73 @@ def solve_vibrational_temperature_from_vibrational_energy(
             molar_masses,
         )
 
-    # Flatten input for scalar Newton iteration
-    original_shape = e_V_target.shape
-    e_V_flat = e_V_target.flatten()
-    T_V_flat = T_V_initial.flatten()
-    c_s_flat = c_s.reshape(c_s.shape[0], -1)  # (n_species, N_flat)
-
-    # Create a scalar residual function for each cell
-    def scalar_residual_fn(T_V_scalar, e_V_target_scalar, c_s_col):
-        """Residual for a single cell: f(T_V) = Σ c_s e_{v,s}(T_V) - e_V_target"""
-        # Compute e_v for all species at this T_V
-        e_v_species = compute_e_v_internal(jnp.array([T_V_scalar]))  # (n_species, 1)
-
-        # Compute mixture vibrational energy
-        e_V_computed = jnp.sum(c_s_col * e_v_species[:, 0])
-
-        # Residual
-        return e_V_computed - e_V_target_scalar
-
-    # Vectorize the scalar Newton iteration across all cells
-    def compute_residual_and_jacobian(T_V_scalar, e_V_target_scalar, c_s_col):
-        """Compute residual and its derivative for a single cell."""
-        res_and_grad = jax.value_and_grad(
-            lambda t: scalar_residual_fn(t, e_V_target_scalar, c_s_col)
+        # Compute C_{v,V} for all species at T_V: shape (n_species, N)
+        cv_v_species = compute_cv_vib_electronic(
+            T_V,
+            T_limit_low,
+            T_limit_high,
+            enthalpy_coeffs,
+            is_monoatomic,
+            molar_masses,
         )
-        return res_and_grad(T_V_scalar)
 
-    # Vectorize over all cells
-    vectorized_compute = jax.vmap(compute_residual_and_jacobian, in_axes=(0, 0, 1))
+        # Mixture vibrational energy: sum_s c_s e_{v,s}(T_V)
+        e_V_computed = jnp.sum(c_s * e_v_species, axis=0)  # shape (N,)
 
-    # Newton-Raphson iteration
-    for _ in range(max_iterations):
-        # Compute residual and Jacobian for all cells
-        residual, jacobian_diag = vectorized_compute(T_V_flat, e_V_flat, c_s_flat)
+        # Residual: f(T_V) = e_V_computed - e_V_target
+        residual = e_V_computed - e_V_target
 
-        # Newton update: ΔT_V = -f / (df/dT_V)
-        delta_T_V_full = -residual / jnp.clip(jacobian_diag, 1e-20, None)
+        # Jacobian: df/dT_V = sum_s c_s C_{v,V}^s(T_V)
+        jacobian = jnp.sum(c_s * cv_v_species, axis=0)  # shape (N,)
+
+        return residual, jacobian
+
+    def _newton_step(
+        carry: tuple[Float[Array, " N"], Float[Array, " N"], int],
+    ) -> tuple[Float[Array, " N"], Float[Array, " N"], int]:
+        """Perform one Newton-Raphson iteration."""
+        T_V, delta_T_V_prev, iteration = carry
+
+        # Compute residual and Jacobian
+        residual, jacobian = _compute_residual_and_jacobian(T_V)
+
+        # Newton update: delta_T_V = -f / (df/dT_V)
+        # Clip jacobian to avoid division by zero (jacobian should be positive)
+        delta_T_V_full = -residual / jnp.clip(jacobian, 1e-20, None)
 
         # Apply damping to prevent overshooting (limit step to 0.5 * T_V)
-        # This helps convergence when far from solution
-        max_step = 0.5 * jnp.abs(T_V_flat)
+        max_step = 0.5 * T_V
         delta_T_V = jnp.clip(delta_T_V_full, -max_step, max_step)
 
-        # Update temperature (ensure positive)
-        T_V_new = jnp.maximum(T_V_flat + delta_T_V, 50.0)  # Min temperature 50K
+        # Update temperature (ensure positive, minimum 50K)
+        T_V_new = jnp.maximum(T_V + delta_T_V, 50.0)
 
-        # Check convergence
+        return T_V_new, delta_T_V, iteration + 1
+
+    def _continue_condition(
+        carry: tuple[Float[Array, " N"], Float[Array, " N"], int],
+    ) -> bool:
+        """Check if iteration should continue."""
+        T_V, delta_T_V, iteration = carry
+
+        # Check convergence for all cells
         abs_error = jnp.abs(delta_T_V)
-        rel_error = abs_error / jnp.clip(jnp.abs(T_V_new), 1e-10, None)
-
+        rel_error = abs_error / jnp.clip(jnp.abs(T_V), 1e-10, None)
         converged = (abs_error < atol) | (rel_error < rtol)
+        all_converged = jnp.all(converged)
 
-        # Update only non-converged cells (for JIT compatibility, we can't break early)
-        # Keep converged cells at their current value
-        T_V_flat = jnp.where(converged, T_V_flat, T_V_new)
+        # Continue if not all converged AND under max iterations
+        return (~all_converged) & (iteration < max_iterations)
 
-    # Reshape back to original shape
-    T_V_result = T_V_flat.reshape(original_shape)
+    # Initialize: T_V, delta_T_V (set to inf to ensure first iteration runs), iteration
+    initial_carry = (T_V_initial, jnp.full_like(T_V_initial, jnp.inf), 0)
 
-    return T_V_result
+    # Run Newton-Raphson with early exit
+    T_V_final, _, _ = jax.lax.while_loop(
+        _continue_condition, _newton_step, initial_carry
+    )
+
+    return T_V_final
 
 
 def solve_T_from_internal_energy(
@@ -597,3 +729,48 @@ def compute_e_ve(
         species_table.is_monoatomic,
         species_table.molar_masses,
     )
+
+
+def compute_electronic_energy_from_levels(
+    T_el: Float[Array, " N"],
+    g_i: Float[Array, " n_levels"],
+    theta_el_i: Float[Array, " n_levels"],
+    R_s: float | jnp.ndarray,
+) -> Float[Array, " N"]:
+    """
+    Compute electronic internal energy e_el,s(T_el) [J/kg] from discrete electronic levels.
+
+    Implements:
+        e_el,s = R_s * (sum_{i!=0} g_i * theta_i * exp(-theta_i/T_el)) /
+                       (sum_i     g_i         exp(-theta_i/T_el))
+
+    Args:
+        T_el: Electronic temperature [K]. Can be scalar or array (...,).
+        g_i: Degeneracy array for levels i, including ground state i=0. Shape (n_levels,).
+        theta_el_i: Characteristic electronic temperatures [K] for each level,
+                    including ground state theta=0. Shape (n_levels,).
+        R_s: Species gas constant [J/(kg*K)] (Ru / M_s). Can be float or array broadcastable to T_el.
+
+    Returns:
+        e_el: Electronic internal energy [J/kg], same shape as T_el.
+    """
+    T_el = jnp.asarray(T_el)
+
+    # Broadcast to shape (n_levels, ...) for vectorized evaluation
+    theta = theta_el_i[:, None] if T_el.ndim > 0 else theta_el_i
+    g = g_i[:, None] if T_el.ndim > 0 else g_i
+
+    # Avoid division by zero at T=0
+    T_safe = jnp.maximum(T_el, 1e-12)
+
+    # Boltzmann weights: w_i = g_i * exp(-theta_i/T)
+    w = g * jnp.exp(-theta / T_safe)
+
+    # Partition function (denominator): sum_i w_i
+    Z = jnp.sum(w, axis=0)
+
+    # Numerator excludes ground state i=0
+    numerator = jnp.sum(w[1:] * theta[1:], axis=0)
+
+    # e_el = R_s * numerator / Z
+    return R_s * numerator / jnp.clip(Z, 1e-300, None)
