@@ -210,7 +210,7 @@ def compute_reaction_rates(
     """
     # Convert to molar concentrations in cgs units [mol/cm³]
     # c_s = 0.001 * rho_s / M_s
-    c_s = 0.001 * rho_s / M_s[None, :]  # [n_cells, n_species]
+    c_s = 1e-6 * rho_s / M_s[None, :]  # [n_cells, n_species]
 
     # Compute concentration products for forward reaction
     # ∏_s c_s^{α_{s,r}} for each reaction r
@@ -233,8 +233,8 @@ def compute_reaction_rates(
     # Compute reaction rates (Eqs. 42-43)
     # R_f = 1000 * k_f * ∏_s c_s^{α_{s,r}}
     # R_b = 1000 * k_b * ∏_s c_s^{β_{s,r}}
-    R_f = 1000.0 * k_f * prod_forward  # [n_reactions, n_cells]
-    R_b = 1000.0 * k_b * prod_backward  # [n_reactions, n_cells]
+    R_f = 1e6 * k_f * prod_forward  # [n_reactions, n_cells]
+    R_b = 1e6 * k_b * prod_backward  # [n_reactions, n_cells]
 
     return R_f, R_b
 
@@ -274,30 +274,6 @@ def compute_species_production_rates(
     omega_dot = M_s[None, :] * n_dot  # [n_cells, n_species]
 
     return omega_dot
-
-
-def compute_chemical_energy_source(
-    omega_dot: Float[Array, "n_cells n_species"],
-    h_s0: Float[Array, " n_species"],
-) -> Float[Array, " n_cells"]:
-    """Compute chemical energy source term Q_chem.
-
-    The chemical energy release/absorption:
-        Q_chem = -Σ_s ω̇_s * h_{s,0}
-
-    where h_{s,0} is the formation enthalpy at reference temperature.
-    Negative sign: exothermic reactions (products have lower h_s0) release energy.
-
-    Args:
-        omega_dot: Mass production rates [kg/m³/s]. Shape [n_cells, n_species].
-        h_s0: Formation enthalpy at T_ref [J/kg]. Shape [n_species].
-
-    Returns:
-        Q_chem: Chemical energy source [W/m³]. Shape [n_cells].
-    """
-    # Q_chem = -Σ_s ω̇_s * h_{s,0}
-    Q_chem = -jnp.sum(omega_dot * h_s0[None, :], axis=1)
-    return Q_chem
 
 
 def compute_vibrational_reactive_source(
@@ -381,7 +357,8 @@ def compute_vibrational_reactive_source_casseau(
     """
     # D̂_s = ĉ_2 * e_v_s(T_v)
     # D_hat_s = preferential_factor * e_v_s  # [n_species, n_cells]
-    D_hat_s = jnp.array([0.3 * 3.36e7, 0.3 * 3.36e7])[:, None]
+    D_hat_s = jnp.array([0.3 * 3.36e7, 0.0])[:, None]
+    # D_hat_s = 1.0 * e_v_s
 
     # Only molecules contribute (atoms have is_monoatomic = True)
     # Mask out atoms by setting their contribution to zero
@@ -404,7 +381,6 @@ def compute_all_chemical_sources(
 ) -> tuple[
     Float[Array, "n_cells n_species"],
     Float[Array, " n_cells"],
-    Float[Array, " n_cells"],
 ]:
     """Compute all chemical source terms.
 
@@ -423,7 +399,6 @@ def compute_all_chemical_sources(
         Q_vib_chem: Vibrational reactive source [W/m³]. Shape [n_cells].
     """
     M_s = species_table.molar_masses
-    h_s0 = species_table.h_s0
 
     # Compute rate-controlling temperature for each reaction
     T_q = compute_rate_controlling_temperature(
@@ -456,9 +431,6 @@ def compute_all_chemical_sources(
         M_s, reaction_table.net_stoich, R_f, R_b
     )
 
-    # Chemical energy source
-    Q_chem = compute_chemical_energy_source(omega_dot, h_s0)
-
     # Vibrational reactive source (Eq. 51)
     e_v_s = species_table.energy_model.e_ve(T_v)  # [n_species, n_cells]
     e_el_s = species_table.energy_model.e_el(T_v)  # [n_species, n_cells]
@@ -470,4 +442,4 @@ def compute_all_chemical_sources(
         reaction_table.preferential_factor,
     )
 
-    return omega_dot, Q_chem, Q_vib_chem
+    return omega_dot, Q_vib_chem

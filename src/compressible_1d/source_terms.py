@@ -47,16 +47,13 @@ def compute_source_terms(
     S = jnp.zeros((n_cells, n_variables))
 
     # === Chemical Source Terms ===
-    omega_dot, Q_chem, Q_vib_chem = compute_chemical_source(U, equation_manager)
+    omega_dot, Q_vib_chem = compute_chemical_source(U, equation_manager)
 
     # Species production rates
     S = S.at[:, :n_species].set(omega_dot)
 
     # No momentum source (inviscid)
     # S[:, n_species] = 0
-
-    # Chemical energy release (total energy equation)
-    S = S.at[:, n_species + 1].set(Q_chem)
 
     # === Vibrational-Electronic Energy Sources (Eq. 16 from NASA TP-2867) ===
 
@@ -279,7 +276,6 @@ def compute_chemical_source(
 ) -> tuple[
     Float[Array, "n_cells n_species"],
     Float[Array, " n_cells"],
-    Float[Array, " n_cells"],
 ]:
     """Compute chemical reaction source terms.
 
@@ -316,7 +312,7 @@ def compute_chemical_source(
     rho_s = U[:, :n_species]  # [n_cells, n_species]
 
     # Compute all chemical sources using reaction_rates module
-    omega_dot, Q_chem, Q_vib_chem = reaction_rates.compute_all_chemical_sources(
+    omega_dot, Q_vib_chem = reaction_rates.compute_all_chemical_sources(
         rho_s=rho_s,
         T=T,
         T_v=T_v,
@@ -324,7 +320,7 @@ def compute_chemical_source(
         reaction_table=equation_manager.reactions,
     )
 
-    return omega_dot, Q_chem, Q_vib_chem
+    return omega_dot, Q_vib_chem
 
 
 def compute_electron_neutral_collision_frequency(

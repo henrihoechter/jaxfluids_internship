@@ -1,0 +1,26 @@
+{
+  "description": "Park kinetic model for air chemistry (neutral species only). From NASA TP-2867 Table III. All M reactions expanded into explicit individual reactions.",
+  "reference": "Gnoffo, P.A., Gupta, R.N., and Shinn, J.L., 'Conservation Equations and Physical Models for Hypersonic Air Flows in Thermal and Chemical Nonequilibrium', NASA TP-2867, 1989.",
+  "species_order": ["N", "O", "N2", "O2", "NO"],
+  "units": {
+    "C_f": "cgs (cm^3/mol/s for bimolecular, cm^6/mol^2/s for termolecular)",
+    "n_f": "dimensionless",
+    "E_f_over_k": "K (activation energy / Boltzmann constant)",
+    "equilibrium_coeffs": "dimensionless (B1-B5 for K_c polynomial)"
+  },
+  "reactions": [
+    {
+      "table_index": 5,
+      "equation": "N2 + N2 -> 2N + N2",
+      "description": "N2 dissociation with M = N2 (from Table III reaction 5)",
+      "reactants": {"N2": 2},
+      "products": {"N": 2, "N2": 1},
+      "is_dissociation": true,
+      "is_electron_impact": false,
+      "C_f": 7e21,
+      "n_f": -1.6,
+      "E_f_over_k": 1.135e+05,
+      "equilibrium_coeffs": [1.858, -1.325, -9.856, -0.174, 0.008]
+    }
+  ]
+}
