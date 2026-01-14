@@ -181,6 +181,69 @@ def run(
     return U_history, t_history
 
 
+@jax.jit(static_argnums=(2, 3))
+def run_scan(
+    U_init: Float[Array, "n_cells n_variables"],
+    equation_manager: equation_manager_types.EquationManager,
+    t_final: float,
+    save_interval: int = 100,
+) -> tuple[
+    Float[Array, "n_snapshots n_cells n_variables"], Float[Array, "n_snapshots"]
+]:
+    """Run simulation from t=0 to t=t_final using jax.lax.scan."""
+    dt = equation_manager.numerics_config.dt
+
+    # Number of steps/snapshots (static given dt/t_final/save_interval)
+    n_steps = int(t_final / dt)
+    n_snapshots = int(n_steps // save_interval) + 1
+
+    n_cells, n_variables = U_init.shape
+    U_history0 = jnp.zeros((n_snapshots, n_cells, n_variables), dtype=U_init.dtype)
+    t_history0 = jnp.zeros((n_snapshots,), dtype=jnp.result_type(dt, 0.0))
+
+    # Write initial snapshot
+    U_history0 = U_history0.at[0].set(U_init)
+    t_history0 = t_history0.at[0].set(0.0)
+
+    # Carry: (U, t, snapshot_idx, U_history, t_history)
+    carry0 = (
+        U_init,
+        jnp.array(0.0, dtype=t_history0.dtype),
+        jnp.array(1, dtype=jnp.int32),
+        U_history0,
+        t_history0,
+    )
+
+    def body(carry, step_idx):
+        U, t, snap_i, U_hist, t_hist = carry
+
+        # Advance
+        U = advance_one_step(U, equation_manager)
+        t = t + dt
+
+        # Save every save_interval steps
+        save = (step_idx % save_interval) == 0  # step_idx is 1..n_steps
+
+        def do_save(args):
+            U_, t_, snap_i_, U_hist_, t_hist_ = args
+            U_hist_ = U_hist_.at[snap_i_].set(U_)
+            t_hist_ = t_hist_.at[snap_i_].set(t_)
+            return (U_, t_, snap_i_ + jnp.array(1, jnp.int32), U_hist_, t_hist_)
+
+        def no_save(args):
+            return args
+
+        carry = jax.lax.cond(save, do_save, no_save, (U, t, snap_i, U_hist, t_hist))
+        return carry, None
+
+    # Scan over steps 1..n_steps (so modulo matches your original for-loop)
+    carry_final, _ = jax.lax.scan(
+        body, carry0, xs=jnp.arange(1, n_steps + 1, dtype=jnp.int32)
+    )
+    _, _, _, U_history, t_history = carry_final
+    return U_history, t_history
+
+
 @runtime_check_array_sizes
 def advance_one_step(
     U: Float[Array, "n_cells n_variables"],

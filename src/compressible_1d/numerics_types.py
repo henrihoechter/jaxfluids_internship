@@ -38,8 +38,8 @@ class ClippingConfig:
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True, slots=True)
 class NumericsConfig:
-    dt: float
-    dx: float
+    dt: float = field(metadata=dict(static=True))
+    dx: float = field(metadata=dict(static=True))
     integrator_scheme: Literal["forward-euler", "rk2"] = field(
         metadata=dict(static=True)
     )
