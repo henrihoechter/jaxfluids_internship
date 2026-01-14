@@ -21,7 +21,7 @@ class EquationManager:
 
     species: chemistry_types.SpeciesTable
     collision_integrals: chemistry_types.CollisionIntegralTable | None
-    reactions: tuple[chemistry_types.Reactions] | None
+    reactions: chemistry_types.ReactionTable | None
 
     numerics_config: numerics_types.NumericsConfig
 

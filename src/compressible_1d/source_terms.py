@@ -1,6 +1,6 @@
 """Source terms module for multi-species two-temperature equations.
 
-Implements vibrational relaxation and frozen chemistry stubs.
+Implements vibrational relaxation and chemical reaction source terms.
 """
 
 import jax.numpy as jnp
@@ -10,6 +10,7 @@ from compressible_1d import constants
 from compressible_1d import equation_manager_types
 from compressible_1d import equation_manager_utils
 from compressible_1d import thermodynamic_relations
+from compressible_1d import reaction_rates
 
 
 def compute_source_terms(
@@ -18,14 +19,20 @@ def compute_source_terms(
 ) -> Float[Array, "n_cells n_variables"]:
     """Compute all source terms: chemistry + vibrational relaxation.
 
-    For frozen chemistry: only vibrational relaxation is active.
+    For frozen chemistry (reactions=None): only vibrational relaxation is active.
+    For reacting flow: includes species production, chemical energy, and
+    vibrational reactive source terms.
 
     Args:
         U: Conserved state [n_cells, n_variables]
-        equation_manager: Contains species table and config
+        equation_manager: Contains species table, reactions, and config
 
     Returns:
         S: Source terms [n_cells, n_variables]
+            S[:, 0:n_species] = ω̇_s (species mass production rates)
+            S[:, n_species] = 0 (momentum, inviscid)
+            S[:, n_species+1] = Q_chem (chemical energy release)
+            S[:, n_species+2] = Q_TV + Q_vib_chem (vibrational energy)
 
     Notes:
         - Frozen chemistry: species source terms are zero (ω̇_i = 0)
@@ -39,31 +46,37 @@ def compute_source_terms(
     # Initialize source terms to zero
     S = jnp.zeros((n_cells, n_variables))
 
-    # Frozen chemistry: no species source terms
-    # S[:, :n_species] = 0
+    # === Chemical Source Terms ===
+    omega_dot, Q_chem, Q_vib_chem = compute_chemical_source(U, equation_manager)
+
+    # Species production rates
+    S = S.at[:, :n_species].set(omega_dot)
 
     # No momentum source (inviscid)
     # S[:, n_species] = 0
 
-    # No total energy source (inviscid, frozen chemistry)
-    # S[:, n_species + 1] = 0
+    # Chemical energy release (total energy equation)
+    S = S.at[:, n_species + 1].set(Q_chem)
 
     # === Vibrational-Electronic Energy Sources (Eq. 16 from NASA TP-2867) ===
 
     # Term 6: Vibrational-translational relaxation
     Q_TV = compute_vibrational_relaxation(U, equation_manager)
 
-    Q_eT = jnp.zeros_like(Q_TV)
-    Q_ion = jnp.zeros_like(Q_TV)
+    Q_VV = jnp.zeros_like(Q_TV)  # TODO: implement vibrational-vibrational relaxation
+    Q_eT = jnp.zeros_like(Q_TV)  # TODO: implement electron-translational relaxation
+    Q_ion = jnp.zeros_like(Q_TV)  # TODO: implement electron-impact ionization loss
 
     # Term 7: Electron-translational relaxation
     # Q_eT = compute_eT_relaxation(U, equation_manager)
 
-    # # Term 8: Electron impact ionization loss (= 0 for frozen chemistry)
+    # Term 8: Electron impact ionization loss (= 0 for frozen chemistry)
     # Q_ion = compute_electron_impact_ionization_loss(U, equation_manager)
 
     # Total source for vibrational-electronic energy (last variable = ρE_v)
-    S = S.at[:, n_species + 2].set(Q_TV + Q_eT + Q_ion)
+    # Includes: relaxation + chemical reactive source
+    S = S.at[:, n_species + 2].set(Q_TV + Q_VV + Q_eT + Q_ion + Q_vib_chem)
+    # S = S.at[:, n_species + 2].set(Q_vib_chem)
 
     return S
 
@@ -263,20 +276,55 @@ def compute_relaxation_time(
 def compute_chemical_source(
     U: Float[Array, "n_cells n_variables"],
     equation_manager: equation_manager_types.EquationManager,
-) -> Float[Array, "n_cells n_variables"]:
+) -> tuple[
+    Float[Array, "n_cells n_species"],
+    Float[Array, " n_cells"],
+    Float[Array, " n_cells"],
+]:
     """Compute chemical reaction source terms.
 
-    For frozen chemistry: returns zeros.
+    For frozen chemistry (reactions=None): returns zeros.
+    For reacting flow: computes species production rates, chemical energy,
+    and vibrational reactive source.
 
     Args:
         U: Conserved state [n_cells, n_variables]
-        equation_manager: Contains reaction data (unused for frozen)
+        equation_manager: Contains species table and reaction data
 
     Returns:
-        S_chem: Chemical source terms [n_cells, n_variables] (all zeros)
+        omega_dot: Species mass production rates [kg/m³/s]. Shape [n_cells, n_species].
+        Q_chem: Chemical energy source [W/m³]. Shape [n_cells].
+        Q_vib_chem: Vibrational reactive source [W/m³]. Shape [n_cells].
     """
-    # Frozen chemistry: no reactions (ω̇_i = 0 for all species)
-    return jnp.zeros_like(U)
+    n_cells = U.shape[0]
+    n_species = equation_manager.species.n_species
+
+    # Check if reactions are defined
+    if equation_manager.reactions is None:
+        # Frozen chemistry: no reactions
+        omega_dot = jnp.zeros((n_cells, n_species))
+        Q_chem = jnp.zeros(n_cells)
+        Q_vib_chem = jnp.zeros(n_cells)
+        return omega_dot, Q_chem, Q_vib_chem
+
+    # Extract primitives (only need T and T_v for rate calculations)
+    _, _, T, T_v, _ = equation_manager_utils.extract_primitives_from_U(
+        U, equation_manager
+    )
+
+    # Get partial densities directly from conserved variables
+    rho_s = U[:, :n_species]  # [n_cells, n_species]
+
+    # Compute all chemical sources using reaction_rates module
+    omega_dot, Q_chem, Q_vib_chem = reaction_rates.compute_all_chemical_sources(
+        rho_s=rho_s,
+        T=T,
+        T_v=T_v,
+        species_table=equation_manager.species,
+        reaction_table=equation_manager.reactions,
+    )
+
+    return omega_dot, Q_chem, Q_vib_chem
 
 
 def compute_electron_neutral_collision_frequency(

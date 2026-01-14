@@ -180,10 +180,144 @@ class Reactions:
         raise NotImplementedError("Reactions are not implemented yet.")
 
 
-@dataclass(frozen=True, slots=True)
+@jax.tree_util.register_dataclass
+@dataclass
 class ReactionTable:
-    """Data structure containing multiple reactions in a format suitable for JAX
-    processing."""
+    """Vectorized reaction data for JAX processing.
+
+    Implements the chemical kinetic model from NASA TP-2867 (Gnoffo et al. 1989).
+
+    The stoichiometry arrays define reactions of the form:
+        Σ_s α_{s,r} [Species_s] ↔ Σ_s β_{s,r} [Species_s]
+
+    Rate coefficients follow the Arrhenius form (Eq. 46a):
+        k_{f,r} = C_{f,r} * T_q^{n_{f,r}} * exp(-E_{f,r} / k*T_q)
+
+    where T_q is the rate-controlling temperature:
+        - Dissociation reactions: T_d = √(T * T_v) (Park model)
+        - Electron impact reactions: T_v
+        - Other reactions: T
+
+    Equilibrium constants use polynomial curve fit (Eq. 47):
+        K_{c,r} = exp(B_1 + B_2*ln(Z) + B_3*Z + B_4*Z² + B_5*Z³)
+        where Z = 10000/T
+
+    Attributes:
+        species_names: Ordered tuple of species names matching stoichiometry columns.
+        reactant_stoich: Stoichiometric coefficients for reactants α_{s,r}.
+            Shape [n_reactions, n_species].
+        product_stoich: Stoichiometric coefficients for products β_{s,r}.
+            Shape [n_reactions, n_species].
+        C_f: Arrhenius pre-exponential factor [cgs units: cm³/mol/s or cm⁶/mol²/s].
+            Shape [n_reactions].
+        n_f: Arrhenius temperature exponent [-]. Shape [n_reactions].
+        E_f_over_k: Activation energy divided by Boltzmann constant [K].
+            Shape [n_reactions].
+        equilibrium_coeffs: Polynomial coefficients B_1 to B_5 for K_c.
+            Shape [n_reactions, 5].
+        is_dissociation: Flag for dissociation reactions (use T_d = √(T*T_v)).
+            Shape [n_reactions].
+        is_electron_impact: Flag for electron impact reactions (use T_v).
+            Shape [n_reactions].
+        preferential_factor: Factor ĉ_2 for vibrational energy reactive source (Eq. 51).
+            1.0 = nonpreferential, >1.0 = preferential dissociation.
+    """
+
+    # Species ordering (must match SpeciesTable)
+    species_names: tuple[str, "n_species"] = field(metadata=dict(static=True))
+
+    # Stoichiometry [n_reactions, n_species]
+    reactant_stoich: Float[jt.Array, "n_reactions n_species"]  # α_{s,r}
+    product_stoich: Float[jt.Array, "n_reactions n_species"]  # β_{s,r}
+
+    # Arrhenius parameters (Eq. 46a)
+    C_f: Float[jt.Array, " n_reactions"]  # Pre-exponential [cgs units]
+    n_f: Float[jt.Array, " n_reactions"]  # Temperature exponent [-]
+    E_f_over_k: Float[jt.Array, " n_reactions"]  # Activation energy / k [K]
+
+    # Equilibrium constant polynomial (Eq. 47)
+    # K_c = exp(B_1 + B_2*ln(Z) + B_3*Z + B_4*Z² + B_5*Z³), Z = 10000/T
+    equilibrium_coeffs: Float[jt.Array, "n_reactions 5"]  # [B_1, B_2, B_3, B_4, B_5]
+
+    # Reaction type flags
+    is_dissociation: Float[jt.Array, " n_reactions"]  # Use T_d = √(T*T_v)
+    is_electron_impact: Float[jt.Array, " n_reactions"]  # Use T_v
+
+    # Preferential dissociation factor (Eq. 51)
+    preferential_factor: float = 1.0  # ĉ_2: 1.0 = nonpreferential
+
+    def __post_init__(self):
+        """Validate data consistency."""
+        n_reactions = self.C_f.shape[0]
+        n_species = len(self.species_names)
+
+        # Check stoichiometry shapes
+        assert (
+            self.reactant_stoich.shape
+            == (
+                n_reactions,
+                n_species,
+            )
+        ), f"reactant_stoich shape {self.reactant_stoich.shape} != ({n_reactions}, {n_species})"
+        assert (
+            self.product_stoich.shape
+            == (
+                n_reactions,
+                n_species,
+            )
+        ), f"product_stoich shape {self.product_stoich.shape} != ({n_reactions}, {n_species})"
+
+        # Check Arrhenius parameter shapes
+        assert self.C_f.shape == (
+            n_reactions,
+        ), f"C_f shape {self.C_f.shape} != ({n_reactions},)"
+        assert self.n_f.shape == (
+            n_reactions,
+        ), f"n_f shape {self.n_f.shape} != ({n_reactions},)"
+        assert self.E_f_over_k.shape == (
+            n_reactions,
+        ), f"E_f_over_k shape {self.E_f_over_k.shape} != ({n_reactions},)"
+
+        # Check equilibrium coefficients shape
+        assert (
+            self.equilibrium_coeffs.shape
+            == (
+                n_reactions,
+                5,
+            )
+        ), f"equilibrium_coeffs shape {self.equilibrium_coeffs.shape} != ({n_reactions}, 5)"
+
+        # Check flag shapes
+        assert self.is_dissociation.shape == (
+            n_reactions,
+        ), f"is_dissociation shape {self.is_dissociation.shape} != ({n_reactions},)"
+        assert (
+            self.is_electron_impact.shape == (n_reactions,)
+        ), f"is_electron_impact shape {self.is_electron_impact.shape} != ({n_reactions},)"
+
+    @property
+    def n_reactions(self) -> int:
+        """Number of reactions in the table."""
+        return self.C_f.shape[0]
+
+    @property
+    def n_species(self) -> int:
+        """Number of species in the reaction mechanism."""
+        return len(self.species_names)
+
+    @property
+    def net_stoich(self) -> Float[jt.Array, "n_reactions n_species"]:
+        """Net stoichiometric coefficients (β - α) for each reaction."""
+        return self.product_stoich - self.reactant_stoich
+
+    def get_species_index(self, name: str) -> int:
+        """Get the index of a species by name."""
+        try:
+            return self.species_names.index(name)
+        except ValueError:
+            raise ValueError(
+                f"Species '{name}' not found. Available: {self.species_names}"
+            )
 
 
 @dataclass(frozen=True, slots=True)
