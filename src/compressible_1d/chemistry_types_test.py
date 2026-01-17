@@ -116,6 +116,7 @@ def test_array_shapes_consistency():
         ("dissociation_energy", species_table.dissociation_energy),
         ("ionization_energy", species_table.ionization_energy),
         ("vibrational_relaxation_factor", species_table.vibrational_relaxation_factor),
+        ("theta_vib", species_table.theta_vib),
     ]
 
     for name, array in arrays_1d:

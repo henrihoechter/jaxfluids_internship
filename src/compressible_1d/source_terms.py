@@ -299,26 +299,25 @@ def compute_chemical_source(
     if equation_manager.reactions is None:
         # Frozen chemistry: no reactions
         omega_dot = jnp.zeros((n_cells, n_species))
-        Q_chem = jnp.zeros(n_cells)
         Q_vib_chem = jnp.zeros(n_cells)
-        return omega_dot, Q_chem, Q_vib_chem
 
-    # Extract primitives (only need T and T_v for rate calculations)
-    _, _, T, T_v, _ = equation_manager_utils.extract_primitives_from_U(
-        U, equation_manager
-    )
+    else:
+        # Extract primitives (only need T and T_v for rate calculations)
+        _, _, T, T_v, _ = equation_manager_utils.extract_primitives_from_U(
+            U, equation_manager
+        )
 
-    # Get partial densities directly from conserved variables
-    rho_s = U[:, :n_species]  # [n_cells, n_species]
+        # Get partial densities directly from conserved variables
+        rho_s = U[:, :n_species]  # [n_cells, n_species]
 
-    # Compute all chemical sources using reaction_rates module
-    omega_dot, Q_vib_chem = reaction_rates.compute_all_chemical_sources(
-        rho_s=rho_s,
-        T=T,
-        T_v=T_v,
-        species_table=equation_manager.species,
-        reaction_table=equation_manager.reactions,
-    )
+        # Compute all chemical sources using reaction_rates module
+        omega_dot, Q_vib_chem = reaction_rates.compute_all_chemical_sources(
+            rho_s=rho_s,
+            T=T,
+            T_v=T_v,
+            species_table=equation_manager.species,
+            reaction_table=equation_manager.reactions,
+        )
 
     return omega_dot, Q_vib_chem
 

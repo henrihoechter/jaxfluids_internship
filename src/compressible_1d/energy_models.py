@@ -133,6 +133,16 @@ def _load_bird_energy_data(
     return theta_vib, g_i, theta_el_i
 
 
+def load_bird_characteristic_temperatures(
+    data_path: str, species_names: Sequence[str]
+) -> Float[Array, " n_species"]:
+    """Load Bird characteristic vibrational temperatures for the given species."""
+    theta_vib, _, _ = _load_bird_energy_data(
+        data_path, species_names, include_electronic=False
+    )
+    return theta_vib
+
+
 def _zeros_like_species(
     T_V: Float[Array, " N"], n_species: int
 ) -> Float[Array, "n_species N"]:

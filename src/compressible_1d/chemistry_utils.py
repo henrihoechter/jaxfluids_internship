@@ -6,7 +6,12 @@ from jaxtyping import Float, Array
 
 
 from compressible_1d.chemistry_types import SpeciesTable, ReactionTable
-from compressible_1d import constants, energy_models
+from compressible_1d import (
+    constants,
+    energy_models,
+    reaction_rates,
+    chemistry_types,
+)
 
 
 def _load_molar_mass(entry: dict) -> float:
@@ -47,9 +52,7 @@ def _select_species_entries(
     return [entries[name] for name in species_names]
 
 
-def load_equilibrium_enthalpy_curve_fits(
-    json_path: str, species_name: str
-) -> tuple[
+def load_equilibrium_enthalpy_curve_fits(json_path: str, species_name: str) -> tuple[
     Float[Array, " n_ranges"],
     Float[Array, " n_ranges"],
     Float[Array, "n_parameters n_ranges"],
@@ -178,6 +181,12 @@ def load_species_table(
         molar_masses=molar_masses,
     )
 
+    theta_vib = jnp.full((len(names_tuple),), jnp.nan)
+    if energy_model_config.model.lower() == "bird" and energy_model_config.data_path:
+        theta_vib = energy_models.load_bird_characteristic_temperatures(
+            energy_model_config.data_path, names_tuple
+        )
+
     return SpeciesTable(
         names=names_tuple,
         molar_masses=molar_masses,
@@ -185,6 +194,7 @@ def load_species_table(
         dissociation_energy=dissociation_energy,
         ionization_energy=ionization_energy,
         vibrational_relaxation_factor=vibrational_relaxation_factor,
+        theta_vib=theta_vib,
         charge=charge,
         sigma_es_a=sigma_es_a,
         sigma_es_b=sigma_es_b,
@@ -248,12 +258,13 @@ def check_reaction_coverage(
 
 def load_reactions_from_json(
     json_path: str,
-    species_names: Sequence[str],
+    species_table: chemistry_types.SpeciesTable,
+    chemistry_model_config: reaction_rates.ChemistryModelConfig = reaction_rates.ChemistryModelConfig(),
     preferential_factor: float = 1.0,
 ) -> ReactionTable:
     """Load reaction mechanism from JSON file.
 
-    Reactions involving species not in species_names are silently skipped.
+    Reactions involving species not in species_table are silently skipped.
     Use check_reaction_coverage() beforehand to see which reactions will be
     included or excluded.
 
@@ -270,8 +281,7 @@ def load_reactions_from_json(
 
     Args:
         json_path: Path to JSON file with reaction data.
-        species_names: Ordered list of species names (must match SpeciesTable).
-            The stoichiometry arrays will follow this ordering.
+        species_table: SpeciesTable containing species information.
         preferential_factor: Factor for vibrational reactive source (default 1.0).
 
     Returns:
@@ -286,6 +296,7 @@ def load_reactions_from_json(
     if not isinstance(reactions, list):
         raise ValueError("JSON must contain a 'reactions' array or be an array.")
 
+    species_names = list(species_table.names)
     n_species = len(species_names)
     species_index = {name: i for i, name in enumerate(species_names)}
     species_set = set(species_names)
@@ -339,6 +350,13 @@ def load_reactions_from_json(
             1.0 if rxn.get("is_electron_impact", False) else 0.0
         )
 
+    chemistry_model = reaction_rates.build_chemistry_model_from_config(
+        config=chemistry_model_config,
+        species_table=species_table,  # not needed here
+        net_stoich=product_stoich - reactant_stoich,
+        is_dissociation=is_dissociation,
+    )
+
     return ReactionTable(
         species_names=tuple(species_names),
         reactant_stoich=reactant_stoich,
@@ -350,6 +368,7 @@ def load_reactions_from_json(
         is_dissociation=is_dissociation,
         is_electron_impact=is_electron_impact,
         preferential_factor=preferential_factor,
+        chemistry_model=chemistry_model,
     )
 
 
@@ -393,4 +412,5 @@ def slice_reactions(
         is_dissociation=reaction_table.is_dissociation[indices_array],
         is_electron_impact=reaction_table.is_electron_impact[indices_array],
         preferential_factor=reaction_table.preferential_factor,
+        chemistry_model=reaction_table.chemistry_model,
     )

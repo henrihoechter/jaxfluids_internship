@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import dataclasses
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -8,6 +10,7 @@ from jaxtyping import Float
 
 if TYPE_CHECKING:
     from compressible_1d.energy_models import EnergyModel
+    from compressible_1d.reaction_rates import ChemistryModel
 
 
 @jax.tree_util.register_dataclass
@@ -33,6 +36,7 @@ class SpeciesTable:
     dissociation_energy: Float[jt.Array, " n_species"]  # [J]
     ionization_energy: Float[jt.Array, " n_species"]  # [J]
     vibrational_relaxation_factor: Float[jt.Array, " n_species"]  # [-]
+    theta_vib: Float[jt.Array, " n_species"]  # [K]
 
     # Charge state [n_species]
     charge: Float[
@@ -55,7 +59,7 @@ class SpeciesTable:
     T_ref: float  # [K], typically 298.16
 
     # Energy model callables (configured upfront; static for JIT)
-    energy_model: "EnergyModel" = field(metadata=dict(static=True))
+    energy_model: EnergyModel = field(metadata=dict(static=True))
 
     def __post_init__(self):
         """Validate data consistency."""
@@ -75,6 +79,9 @@ class SpeciesTable:
         assert (
             self.vibrational_relaxation_factor.shape == (n_sp,)
         ), f"vibrational_relaxation_factor shape {self.vibrational_relaxation_factor.shape} != ({n_sp},)"
+        assert self.theta_vib.shape == (
+            n_sp,
+        ), f"theta_vib shape {self.theta_vib.shape} != ({n_sp},)"
         assert self.charge.shape == (
             n_sp,
         ), f"charge shape {self.charge.shape} != ({n_sp},)"
@@ -171,15 +178,6 @@ class SpeciesTable:
             )
 
 
-@dataclass(frozen=True, slots=True)
-class Reactions:
-    reactants: str
-    products: str
-
-    def __post_init__(self):
-        raise NotImplementedError("Reactions are not implemented yet.")
-
-
 @jax.tree_util.register_dataclass
 @dataclass
 class ReactionTable:
@@ -242,6 +240,9 @@ class ReactionTable:
     # Reaction type flags
     is_dissociation: Float[jt.Array, " n_reactions"]  # Use T_d = √(T*T_v)
     is_electron_impact: Float[jt.Array, " n_reactions"]  # Use T_v
+
+    # Chemistry model callables (configured upfront; static for JIT)
+    chemistry_model: ChemistryModel = field(metadata=dict(static=True))
 
     # Preferential dissociation factor (Eq. 51)
     preferential_factor: float = 1.0  # ĉ_2: 1.0 = nonpreferential
@@ -309,6 +310,10 @@ class ReactionTable:
     def net_stoich(self) -> Float[jt.Array, "n_reactions n_species"]:
         """Net stoichiometric coefficients (β - α) for each reaction."""
         return self.product_stoich - self.reactant_stoich
+
+    def with_chemistry_model(self, chemistry_model: "ChemistryModel") -> "ReactionTable":
+        """Return a new ReactionTable with a different chemistry model."""
+        return dataclasses.replace(self, chemistry_model=chemistry_model)
 
     def get_species_index(self, name: str) -> int:
         """Get the index of a species by name."""

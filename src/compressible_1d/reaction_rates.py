@@ -10,10 +10,56 @@ Key equations:
     - Eq. 47: Equilibrium constant polynomial
 """
 
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Callable, Literal
+import numpy as np
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from compressible_1d import chemistry_types
+from compressible_1d import chemistry_types, constants
+
+
+ForwardRateFn = Callable[
+    [
+        Float[Array, " n_cells"],
+        Float[Array, " n_cells"],
+        chemistry_types.SpeciesTable,
+        chemistry_types.ReactionTable,
+    ],
+    Float[Array, "n_reactions n_cells"],
+]
+VibrationalSourceFn = Callable[
+    [
+        Float[Array, "n_cells n_species"],
+        Float[Array, "n_cells n_species"],
+        Float[Array, "n_cells n_species"],
+        Float[Array, " n_cells"],
+        Float[Array, " n_cells"],
+        chemistry_types.SpeciesTable,
+        chemistry_types.ReactionTable,
+    ],
+    Float[Array, " n_cells"],
+]
+
+
+@dataclass(frozen=True, eq=False)
+class ChemistryModel:
+    """Container for chemical kinetics model callables."""
+
+    forward_rate_coefficient: ForwardRateFn
+    vibrational_reactive_source: VibrationalSourceFn
+
+
+@dataclass(frozen=True)
+class ChemistryModelConfig:
+    """Configuration for selecting chemical kinetics models."""
+
+    model: Literal["park", "cvdv_qp"] = "park"
+    park_vibrational_source: Literal["energy", "qp_constant", "qp_linear"] = "energy"
+    qp_constant: float = 0.3
+    qp_linear_coeffs: tuple[float, float] = (0.0, 0.0)
 
 
 def compute_rate_controlling_temperature(
@@ -276,6 +322,16 @@ def compute_species_production_rates(
     return omega_dot
 
 
+def compute_species_production_rates_from_rates(
+    M_s: Float[Array, " n_species"],
+    net_stoich: Float[Array, "n_reactions n_species"],
+    rates: Float[Array, "n_reactions n_cells"],
+) -> Float[Array, "n_cells n_species"]:
+    """Compute species mass production rates from a single reaction-rate array."""
+    n_dot = jnp.einsum("rs,rc->cs", net_stoich, rates)  # [n_cells, n_species]
+    return M_s[None, :] * n_dot
+
+
 def compute_vibrational_reactive_source(
     omega_dot: Float[Array, "n_cells n_species"],
     e_v_s: Float[Array, "n_species n_cells"],
@@ -372,6 +428,277 @@ def compute_vibrational_reactive_source_casseau(
     return Q_vib_chem
 
 
+def _cvdv_partition_function(
+    temperature: Float[Array, "n_species ..."],
+    level_factor: Float[Array, "n_species n_levels"],
+    level_mask: Float[Array, "n_species n_levels"],
+) -> Float[Array, "n_species ..."]:
+    """Compute vibrational partition function with level truncation."""
+    if temperature.ndim == 1:
+        if temperature.shape[0] == level_factor.shape[0]:
+            temperature = temperature[:, None]
+        else:
+            temperature = jnp.broadcast_to(
+                temperature[None, :],
+                (level_factor.shape[0], temperature.shape[0]),
+            )
+
+    exp_arg = -level_factor[:, :, None] / (temperature[:, None, :] + 1e-30)
+    exp_arg = jnp.where(level_mask[:, :, None], exp_arg, -jnp.inf)
+    return jnp.sum(jnp.exp(exp_arg), axis=1)
+
+
+def _cvdv_average_energy(
+    temperature: Float[Array, "n_species ..."],
+    level_factor: Float[Array, "n_species n_levels"],
+    energy_levels: Float[Array, "n_species n_levels"],
+    level_mask: Float[Array, "n_species n_levels"],
+) -> Float[Array, "n_species ..."]:
+    """Compute average vibrational energy per particle for the CVDV model."""
+    if temperature.ndim == 1:
+        if temperature.shape[0] == level_factor.shape[0]:
+            temperature = temperature[:, None]
+        else:
+            temperature = jnp.broadcast_to(
+                temperature[None, :],
+                (level_factor.shape[0], temperature.shape[0]),
+            )
+
+    exp_arg = -level_factor[:, :, None] / (temperature[:, None, :] + 1e-30)
+    exp_arg = jnp.where(level_mask[:, :, None], exp_arg, -jnp.inf)
+    weight = jnp.exp(exp_arg)
+    partition = jnp.sum(weight, axis=1)
+    numerator = jnp.sum(energy_levels[:, :, None] * weight, axis=1)
+    return numerator / (partition + 1e-30)
+
+
+def _cvdv_dissociation_species_indices(
+    net_stoich: Float[Array, "n_reactions n_species"],
+    is_dissociation: Float[Array, " n_reactions"],
+    is_monoatomic: Float[Array, " n_species"],
+) -> jnp.ndarray:
+    net_stoich_np = np.asarray(net_stoich)
+    is_dissociation_np = np.asarray(is_dissociation) > 0.5
+    is_monoatomic_np = np.asarray(is_monoatomic) > 0.5
+
+    indices: list[int] = []
+    for reaction in range(net_stoich_np.shape[0]):
+        if not is_dissociation_np[reaction]:
+            indices.append(0)
+            continue
+        candidates = np.where((net_stoich_np[reaction] < 0.0) & (~is_monoatomic_np))[0]
+        if candidates.size != 1:
+            raise ValueError(
+                "CVDV model expects exactly one dissociating molecule per reaction."
+            )
+        indices.append(int(candidates[0]))
+
+    return jnp.array(indices)
+
+
+def build_park_chemistry_model(
+    config: ChemistryModelConfig | None = None,
+) -> ChemistryModel:
+    """Build the Park chemistry model (Arrhenius + Park vibrational source)."""
+    if config is None:
+        config = ChemistryModelConfig()
+
+    def forward_rate_coefficient(
+        T: Float[Array, " n_cells"],
+        T_v: Float[Array, " n_cells"],
+        species_table: chemistry_types.SpeciesTable,
+        reaction_table: chemistry_types.ReactionTable,
+    ) -> Float[Array, "n_reactions n_cells"]:
+        T_q = compute_rate_controlling_temperature(
+            T, T_v, reaction_table.is_dissociation, reaction_table.is_electron_impact
+        )
+        return compute_forward_rate_coefficient(
+            T_q, reaction_table.C_f, reaction_table.n_f, reaction_table.E_f_over_k
+        )
+
+    def vibrational_reactive_source(
+        omega_dot: Float[Array, "n_cells n_species"],
+        omega_dot_f: Float[Array, "n_cells n_species"],
+        omega_dot_b: Float[Array, "n_cells n_species"],
+        T: Float[Array, " n_cells"],
+        T_v: Float[Array, " n_cells"],
+        species_table: chemistry_types.SpeciesTable,
+        reaction_table: chemistry_types.ReactionTable,
+    ) -> Float[Array, " n_cells"]:
+        if config.park_vibrational_source == "energy":
+            e_ve = species_table.energy_model.e_ve(T_v)
+            D0 = reaction_table.preferential_factor * e_ve
+            return jnp.sum(omega_dot * D0.T, axis=1)
+
+        e_el = species_table.energy_model.e_el(T_v)
+        dissociation_energy = jnp.where(
+            jnp.isfinite(species_table.dissociation_energy),
+            species_table.dissociation_energy,
+            0.0,
+        )
+        mass_per_particle = species_table.molar_masses / constants.N_A
+        if config.park_vibrational_source == "qp_constant":
+            alpha = config.qp_constant
+            D0 = (alpha * dissociation_energy / mass_per_particle)[:, None]
+        else:
+            alpha = config.qp_linear_coeffs[0] + config.qp_linear_coeffs[1] * T
+            alpha = jnp.clip(alpha, 0.0, 1.0)
+            D0 = alpha[None, :] * (dissociation_energy / mass_per_particle)[:, None]
+
+        return jnp.sum(omega_dot * (D0 + e_el).T, axis=1)
+
+    return ChemistryModel(
+        forward_rate_coefficient=forward_rate_coefficient,
+        vibrational_reactive_source=vibrational_reactive_source,
+    )
+
+
+def build_cvdv_qp_chemistry_model(
+    species_table: chemistry_types.SpeciesTable,
+    net_stoich: Float[Array, "n_reactions n_species"],
+    is_dissociation: Float[Array, " n_reactions"],
+) -> ChemistryModel:
+    """Build the CVDV-Qp chemistry model from Casseau (Marrone-Treanor)."""
+    theta_vib = np.asarray(species_table.theta_vib)
+    dissociation_energy = np.asarray(species_table.dissociation_energy)
+    is_monoatomic = np.asarray(species_table.is_monoatomic) > 0.5
+
+    missing_theta = (~is_monoatomic) & (~np.isfinite(theta_vib) | (theta_vib <= 0.0))
+    if np.any(missing_theta):
+        names = np.asarray(species_table.names)[missing_theta]
+        raise ValueError(
+            "CVDV model requires theta_vib for molecular species. "
+            f"Missing for: {tuple(names)}"
+        )
+
+    theta_vib = np.nan_to_num(theta_vib, nan=0.0)
+    dissociation_energy = np.nan_to_num(dissociation_energy, nan=0.0)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        n_levels = np.where(
+            theta_vib > 0.0,
+            np.floor(dissociation_energy / (constants.k * theta_vib)),
+            0,
+        ).astype(int)
+    n_levels = np.maximum(n_levels, 0)
+
+    max_levels = int(n_levels.max()) if n_levels.size else 0
+    levels = jnp.arange(max_levels + 1)
+    level_mask = jnp.array(levels[None, :] <= n_levels[:, None])
+    level_factor = jnp.array(theta_vib)[:, None] * levels[None, :]
+    energy_levels = level_factor * constants.k
+
+    dissociation_indices = _cvdv_dissociation_species_indices(
+        net_stoich,
+        is_dissociation,
+        species_table.is_monoatomic,
+    )
+
+    U_m = jnp.array(dissociation_energy / (3.0 * constants.k))
+    U_m_safe = jnp.where(U_m > 0.0, U_m, 1.0)
+
+    Z_U = _cvdv_partition_function(U_m_safe, level_factor, level_mask)[:, 0]
+    E_U = _cvdv_average_energy(U_m_safe, level_factor, energy_levels, level_mask)[:, 0]
+
+    def forward_rate_coefficient(
+        T: Float[Array, " n_cells"],
+        T_v: Float[Array, " n_cells"],
+        species_table: chemistry_types.SpeciesTable,
+        reaction_table: chemistry_types.ReactionTable,
+    ) -> Float[Array, "n_reactions n_cells"]:
+        T_q = compute_rate_controlling_temperature(
+            T, T_v, reaction_table.is_dissociation, reaction_table.is_electron_impact
+        )
+        k_f = compute_forward_rate_coefficient(
+            T_q, reaction_table.C_f, reaction_table.n_f, reaction_table.E_f_over_k
+        )
+
+        inv_TF = (
+            1.0 / (T_v[None, :] + 1e-30)
+            - 1.0 / (T[None, :] + 1e-30)
+            + 1.0 / (U_m_safe[:, None] + 1e-30)
+        )
+        inv_TF = jnp.clip(inv_TF, a_min=1e-30)
+        T_F = 1.0 / inv_TF
+
+        T_tr_species = jnp.broadcast_to(T[None, :], (level_factor.shape[0], T.shape[0]))
+        T_v_species = jnp.broadcast_to(
+            T_v[None, :], (level_factor.shape[0], T_v.shape[0])
+        )
+        Z_Ttr = _cvdv_partition_function(T_tr_species, level_factor, level_mask)
+        Z_Tv = _cvdv_partition_function(T_v_species, level_factor, level_mask)
+        Z_TF = _cvdv_partition_function(T_F, level_factor, level_mask)
+
+        idx = dissociation_indices
+        Z_Ttr_r = Z_Ttr[idx]
+        Z_Tv_r = Z_Tv[idx]
+        Z_TF_r = Z_TF[idx]
+        Z_U_r = Z_U[idx][:, None]
+
+        k_f_cvdv = (
+            reaction_table.C_f[:, None]
+            * jnp.power(T[None, :], reaction_table.n_f[:, None])
+            * jnp.exp(-reaction_table.E_f_over_k[:, None] / (T[None, :] + 1e-30))
+        )
+        ratio = (Z_Ttr_r * Z_TF_r) / (Z_Tv_r * Z_U_r + 1e-30)
+        k_f = jnp.where(
+            reaction_table.is_dissociation[:, None] > 0.5,
+            k_f_cvdv * ratio,
+            k_f,
+        )
+
+        return k_f
+
+    def vibrational_reactive_source(
+        omega_dot: Float[Array, "n_cells n_species"],
+        omega_dot_f: Float[Array, "n_cells n_species"],
+        omega_dot_b: Float[Array, "n_cells n_species"],
+        T: Float[Array, " n_cells"],
+        T_v: Float[Array, " n_cells"],
+        species_table: chemistry_types.SpeciesTable,
+        reaction_table: chemistry_types.ReactionTable,
+    ) -> Float[Array, " n_cells"]:
+        inv_TF = (
+            1.0 / (T_v[None, :] + 1e-30)
+            - 1.0 / (T[None, :] + 1e-30)
+            + 1.0 / (U_m_safe[:, None] + 1e-30)
+        )
+        inv_TF = jnp.clip(inv_TF, a_min=1e-30)
+        T_F = 1.0 / inv_TF
+
+        E_Tv = _cvdv_average_energy(T_F, level_factor, energy_levels, level_mask)
+        E_Tr = E_U[:, None]
+
+        mass_per_particle = species_table.molar_masses / constants.N_A
+        term_f = omega_dot_f * (E_Tv.T / mass_per_particle[None, :])
+        term_b = omega_dot_b * (E_Tr.T / mass_per_particle[None, :])
+        return jnp.sum(term_f + term_b, axis=1)
+
+    return ChemistryModel(
+        forward_rate_coefficient=forward_rate_coefficient,
+        vibrational_reactive_source=vibrational_reactive_source,
+    )
+
+
+def build_chemistry_model_from_config(
+    config: ChemistryModelConfig,
+    *,
+    species_table: chemistry_types.SpeciesTable,
+    net_stoich: Float[Array, "n_reactions n_species"],
+    is_dissociation: Float[Array, " n_reactions"],
+) -> ChemistryModel:
+    """Build a chemistry model from a configuration object."""
+    model = config.model.lower()
+    if model == "park":
+        return build_park_chemistry_model(config)
+    if model == "cvdv_qp":
+        return build_cvdv_qp_chemistry_model(
+            species_table, net_stoich=net_stoich, is_dissociation=is_dissociation
+        )
+
+    raise ValueError(f"Unknown chemistry model '{config.model}'.")
+
+
 def compute_all_chemical_sources(
     rho_s: Float[Array, "n_cells n_species"],
     T: Float[Array, " n_cells"],
@@ -385,6 +712,7 @@ def compute_all_chemical_sources(
     """Compute all chemical source terms.
 
     This is the main entry point for chemical kinetics calculations.
+    Uses the chemistry model stored in the reaction table when available.
 
     Args:
         rho_s: Partial densities [kg/m³]. Shape [n_cells, n_species].
@@ -395,19 +723,14 @@ def compute_all_chemical_sources(
 
     Returns:
         omega_dot: Mass production rates [kg/m³/s]. Shape [n_cells, n_species].
-        Q_chem: Chemical energy source [W/m³]. Shape [n_cells].
         Q_vib_chem: Vibrational reactive source [W/m³]. Shape [n_cells].
     """
     M_s = species_table.molar_masses
+    chemistry_model = reaction_table.chemistry_model
 
-    # Compute rate-controlling temperature for each reaction
-    T_q = compute_rate_controlling_temperature(
-        T, T_v, reaction_table.is_dissociation, reaction_table.is_electron_impact
-    )
-
-    # Forward rate coefficients (Eq. 46a)
-    k_f = compute_forward_rate_coefficient(
-        T_q, reaction_table.C_f, reaction_table.n_f, reaction_table.E_f_over_k
+    # Forward rate coefficients
+    k_f = chemistry_model.forward_rate_coefficient(
+        T, T_v, species_table, reaction_table
     )
 
     # Equilibrium constants (Eq. 47) - always evaluated at T, not T_q
@@ -431,15 +754,21 @@ def compute_all_chemical_sources(
         M_s, reaction_table.net_stoich, R_f, R_b
     )
 
-    # Vibrational reactive source (Eq. 51)
-    e_v_s = species_table.energy_model.e_ve(T_v)  # [n_species, n_cells]
-    e_el_s = species_table.energy_model.e_el(T_v)  # [n_species, n_cells]
-    Q_vib_chem = compute_vibrational_reactive_source_casseau(
+    omega_dot_f = compute_species_production_rates_from_rates(
+        M_s, reaction_table.net_stoich, R_f
+    )
+    omega_dot_b = compute_species_production_rates_from_rates(
+        M_s, reaction_table.net_stoich, R_b
+    )
+
+    Q_vib_chem = chemistry_model.vibrational_reactive_source(
         omega_dot,
-        e_v_s,
-        e_el_s,
-        species_table.is_monoatomic,
-        reaction_table.preferential_factor,
+        omega_dot_f,
+        omega_dot_b,
+        T,
+        T_v,
+        species_table,
+        reaction_table,
     )
 
     return omega_dot, Q_vib_chem
