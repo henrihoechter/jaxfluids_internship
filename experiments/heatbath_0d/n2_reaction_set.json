@@ -1,26 +1,86 @@
 {
   "description": "Park kinetic model for air chemistry (neutral species only). From NASA TP-2867 Table III. All M reactions expanded into explicit individual reactions.",
   "reference": "Gnoffo, P.A., Gupta, R.N., and Shinn, J.L., 'Conservation Equations and Physical Models for Hypersonic Air Flows in Thermal and Chemical Nonequilibrium', NASA TP-2867, 1989.",
-  "species_order": ["N", "O", "N2", "O2", "NO"],
+  "species_order": [
+    "N",
+    "O",
+    "N2",
+    "O2",
+    "NO"
+  ],
   "units": {
-    "C_f": "cgs (cm^3/mol/s for bimolecular, cm^6/mol^2/s for termolecular)",
+    "C_f": "SI per-molecule (m^3/molecule/s for bimolecular, m^6/molecule^2/s for termolecular)",
     "n_f": "dimensionless",
     "E_f_over_k": "K (activation energy / Boltzmann constant)",
-    "equilibrium_coeffs": "dimensionless (B1-B5 for K_c polynomial)"
+    "equilibrium_coeffs_casseau": "Casseau eq. 2.69 coefficients; n_ref in cm^-3"
   },
   "reactions": [
     {
       "table_index": 5,
       "equation": "N2 + N2 -> 2N + N2",
       "description": "N2 dissociation with M = N2 (from Table III reaction 5)",
-      "reactants": {"N2": 2},
-      "products": {"N": 2, "N2": 1},
+      "reactants": {
+        "N2": 2
+      },
+      "products": {
+        "N": 2,
+        "N2": 1
+      },
       "is_dissociation": true,
       "is_electron_impact": false,
-      "C_f": 7e21,
-      "n_f": -1.6,
-      "E_f_over_k": 1.132e+05,
-      "equilibrium_coeffs": [1.858, -1.325, -9.856, -0.174, 0.008]
+      "C_f": 4.101e-12,
+      "n_f": -0.62,
+      "E_f_over_k": 113500.0
     }
+  ],
+  "equilibrium_coeffs_casseau": [
+      {
+        "n_ref_cm3": 1e14,
+        "A0": 3.4907,
+        "A1": 0.83133,
+        "A2": 4.0978,
+        "A3": -12.728,
+        "A4": 0.07487
+      },
+      {
+        "n_ref_cm3": 1e15,
+        "A0": 2.0723,
+        "A1": 1.3897,
+        "A2": 2.0617,
+        "A3": -11.828,
+        "A4": 0.015105
+      },
+      {
+        "n_ref_cm3": 1e+16,
+        "A0": 1.606,
+        "A1": 1.5732,
+        "A2": 1.3923,
+        "A3": -11.533,
+        "A4": -0.004543
+      },
+      {
+        "n_ref_cm3": 1e+17,
+        "A0": 1.5351,
+        "A1": 1.6061,
+        "A2": 1.2993,
+        "A3": -11.494,
+        "A4": -0.00698
+      },
+      {
+        "n_ref_cm3": 1e+18,
+        "A0": 1.4766,
+        "A1": 1.6291,
+        "A2": 1.2153,
+        "A3": -11.457,
+        "A4": -0.009444
+      },
+      {
+        "n_ref_cm3": 1e+19,
+        "A0": 1.4766,
+        "A1": 1.6291,
+        "A2": 1.2153,
+        "A3": -11.457,
+        "A4": -0.009444
+      }
   ]
 }

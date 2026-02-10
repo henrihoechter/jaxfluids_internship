@@ -2,15 +2,37 @@ from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, Literal
 import jax
 import jax.numpy as jnp
 import jaxtyping as jt
-from jaxtyping import Float
+from jaxtyping import Array, Float, Int
 
 if TYPE_CHECKING:
     from compressible_1d.energy_models import EnergyModel
-    from compressible_1d.reaction_rates import ChemistryModel
+
+
+ForwardRateFn = Callable[
+    [
+        Float[Array, " n_cells"],
+        Float[Array, " n_cells"],
+        "SpeciesTable",
+        "ReactionTable",
+    ],
+    Float[Array, "n_reactions n_cells"],
+]
+VibrationalSourceFn = Callable[
+    [
+        Float[Array, "n_cells n_species"],
+        Float[Array, "n_cells n_species"],
+        Float[Array, "n_cells n_species"],
+        Float[Array, " n_cells"],
+        Float[Array, " n_cells"],
+        "SpeciesTable",
+        "ReactionTable",
+    ],
+    Float[Array, " n_cells"],
+]
 
 
 @jax.tree_util.register_dataclass
@@ -198,47 +220,40 @@ class SpeciesTable:
             )
 
 
+@dataclass(frozen=True, eq=False)
+class ChemistryModel:
+    """Container for chemical kinetics model callables."""
+
+    forward_rate_coefficient: ForwardRateFn
+    vibrational_reactive_source: VibrationalSourceFn
+
+
+@dataclass(frozen=True)
+class ChemistryModelConfig:
+    """Configuration for selecting chemical kinetics models."""
+
+    model: Literal["park", "cvdv_qp"] = "park"
+    park_vibrational_source: Literal["energy", "qp_constant"] = "energy"
+    qp_constant: float = 0.3
+
+
 @jax.tree_util.register_dataclass
 @dataclass
 class ReactionTable:
     """Vectorized reaction data for JAX processing.
 
-    Implements the chemical kinetic model from NASA TP-2867 (Gnoffo et al. 1989).
-
-    The stoichiometry arrays define reactions of the form:
-        Σ_s α_{s,r} [Species_s] ↔ Σ_s β_{s,r} [Species_s]
-
-    Rate coefficients follow the Arrhenius form (Eq. 46a):
-        k_{f,r} = C_{f,r} * T_q^{n_{f,r}} * exp(-E_{f,r} / k*T_q)
-
-    where T_q is the rate-controlling temperature:
-        - Dissociation reactions: T_d = √(T * T_v) (Park model)
-        - Electron impact reactions: T_v
-        - Other reactions: T
-
-    Equilibrium constants use polynomial curve fit (Eq. 47):
-        K_{c,r} = exp(B_1 + B_2*ln(Z) + B_3*Z + B_4*Z² + B_5*Z³)
-        where Z = 10000/T
-
     Attributes:
         species_names: Ordered tuple of species names matching stoichiometry columns.
-        reactant_stoich: Stoichiometric coefficients for reactants α_{s,r}.
-            Shape [n_reactions, n_species].
-        product_stoich: Stoichiometric coefficients for products β_{s,r}.
-            Shape [n_reactions, n_species].
-        C_f: Arrhenius pre-exponential factor [cgs units: cm³/mol/s or cm⁶/mol²/s].
-            Shape [n_reactions].
-        n_f: Arrhenius temperature exponent [-]. Shape [n_reactions].
+        reactant_stoich: Stoichiometric coefficients for reactants alpha_{s,r}.
+        product_stoich: Stoichiometric coefficients for products beta_{s,r}.
+        C_f: Arrhenius pre-exponential factor [m^3/mol/s or m^6/mol^2/s].
+        n_f: Arrhenius temperature exponent [-].
         E_f_over_k: Activation energy divided by Boltzmann constant [K].
-            Shape [n_reactions].
-        equilibrium_coeffs: Polynomial coefficients B_1 to B_5 for K_c.
-            Shape [n_reactions, 5].
-        is_dissociation: Flag for dissociation reactions (use T_d = √(T*T_v)).
-            Shape [n_reactions].
-        is_electron_impact: Flag for electron impact reactions (use T_v).
-            Shape [n_reactions].
-        preferential_factor: Factor ĉ_2 for vibrational energy reactive source (Eq. 51).
-            1.0 = nonpreferential, >1.0 = preferential dissociation.
+        equilibrium_coeffs_casseau: Casseau equilibrium coefficients with columns
+            [n_ref_m3, A0, A1, A2, A3, A4]. n_ref is stored in 1/m^3 and
+            A0..A4 map to A1..A5 in Casseau Eq. 2.69.
+        is_dissociation: Flag for dissociation reactions.
+        is_electron_impact: Flag for electron impact reactions.
     """
 
     # Species ordering (must match SpeciesTable)
@@ -248,24 +263,17 @@ class ReactionTable:
     reactant_stoich: Float[jt.Array, "n_reactions n_species"]  # α_{s,r}
     product_stoich: Float[jt.Array, "n_reactions n_species"]  # β_{s,r}
 
-    # Arrhenius parameters (Eq. 46a)
-    C_f: Float[jt.Array, " n_reactions"]  # Pre-exponential [cgs units]
+    C_f: Float[jt.Array, " n_reactions"]  # Pre-exponential [m^3/mol/s or m^6/mol^2/s]
     n_f: Float[jt.Array, " n_reactions"]  # Temperature exponent [-]
     E_f_over_k: Float[jt.Array, " n_reactions"]  # Activation energy / k [K]
 
-    # Equilibrium constant polynomial (Eq. 47)
-    # K_c = exp(B_1 + B_2*ln(Z) + B_3*Z + B_4*Z² + B_5*Z³), Z = 10000/T
-    equilibrium_coeffs: Float[jt.Array, "n_reactions 5"]  # [B_1, B_2, B_3, B_4, B_5]
+    equilibrium_coeffs_casseau: Float[jt.Array, "n_reactions n_refs 6"]
 
     # Reaction type flags
-    is_dissociation: Float[jt.Array, " n_reactions"]  # Use T_d = √(T*T_v)
-    is_electron_impact: Float[jt.Array, " n_reactions"]  # Use T_v
+    is_dissociation: Float[jt.Array, " n_reactions"] 
+    is_electron_impact: Float[jt.Array, " n_reactions"] 
 
-    # Chemistry model callables (configured upfront; static for JIT)
     chemistry_model: ChemistryModel = field(metadata=dict(static=True))
-
-    # Preferential dissociation factor (Eq. 51)
-    preferential_factor: float = 1.0  # ĉ_2: 1.0 = nonpreferential
 
     def __post_init__(self):
         """Validate data consistency."""
@@ -301,12 +309,13 @@ class ReactionTable:
 
         # Check equilibrium coefficients shape
         assert (
-            self.equilibrium_coeffs.shape
-            == (
-                n_reactions,
-                5,
-            )
-        ), f"equilibrium_coeffs shape {self.equilibrium_coeffs.shape} != ({n_reactions}, 5)"
+            self.equilibrium_coeffs_casseau.ndim == 3
+            and self.equilibrium_coeffs_casseau.shape[0] == n_reactions
+            and self.equilibrium_coeffs_casseau.shape[2] == 6
+        ), (
+            "equilibrium_coeffs_casseau shape "
+            f"{self.equilibrium_coeffs_casseau.shape} != ({n_reactions}, n_refs, 6)"
+        )
 
         # Check flag shapes
         assert self.is_dissociation.shape == (
@@ -328,7 +337,7 @@ class ReactionTable:
 
     @property
     def net_stoich(self) -> Float[jt.Array, "n_reactions n_species"]:
-        """Net stoichiometric coefficients (β - α) for each reaction."""
+        """Net stoichiometric coefficients."""
         return self.product_stoich - self.reactant_stoich
 
     def with_chemistry_model(self, chemistry_model: "ChemistryModel") -> "ReactionTable":

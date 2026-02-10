@@ -9,7 +9,7 @@ from compressible_1d.chemistry_types import SpeciesTable, ReactionTable
 from compressible_1d import (
     constants,
     energy_models,
-    chemistry,
+    reaction_rates,
     chemistry_types,
 )
 
@@ -364,7 +364,8 @@ def check_reaction_coverage(
 def load_reactions_from_json(
     json_path: str,
     species_table: chemistry_types.SpeciesTable,
-    chemistry_model_config: chemistry.ChemistryModelConfig = chemistry.ChemistryModelConfig(),
+    chemistry_model_config: reaction_rates.ChemistryModelConfig = reaction_rates.ChemistryModelConfig(),
+    preferential_factor: float = 1.0,
 ) -> ReactionTable:
     """Load reaction mechanism from JSON file.
 
@@ -376,21 +377,27 @@ def load_reactions_from_json(
         - equation: Human-readable reaction equation
         - reactants: Dict mapping species name to stoichiometric coefficient
         - products: Dict mapping species name to stoichiometric coefficient
-        - is_dissociation: Whether reaction uses CVDV-QP formulation
-        - is_electron_impact: Whether reaction uses T_v for rate control
+        - is_dissociation: Whether reaction uses T_d = sqrt(T*T_v) for rate
+        - is_electron_impact: Whether reaction uses T_v for rate
         - C_f: Pre-exponential factor [m^3/molecule/s or m^6/molecule^2/s]
-        - n_f: Temperature exponent [-]
+          (converted internally to per-mol units for molar formulation)
+        - n_f: Temperature exponent
         - E_f_over_k: Activation energy / k [K]
-        - equilibrium_coeffs_casseau: Casseau coefficients table with rows
-            [n_ref_cm3 or n_ref_m3, A0..A4] for Eq. 2.69
+        - equilibrium_coeffs_casseau: Casseau coefficients table (see below)
 
-    Notes:
-        - C_f is converted from per-molecule to per-mol units on load.
-        - n_ref_cm3 is converted to n_ref_m3 (×1e6).
+    The JSON must include top-level equilibrium_coeffs_casseau. Supported formats:
+        - list: one table per reaction, same order as reactions
+        - dict: mapping keys to tables. If only one entry, it is applied to all reactions.
+
+    Each table is a list of rows with n_ref_cm3 (or n_ref_m3) and A0..A4:
+        {"n_ref_cm3": 1e14, "A0": ..., "A1": ..., "A2": ..., "A3": ..., "A4": ...}
+    Note: n_ref values are interpreted as number density (cm^-3 or m^-3) and
+    converted to mol/m^3 for interpolation.
 
     Args:
         json_path: Path to JSON file with reaction data.
         species_table: SpeciesTable containing species information.
+        preferential_factor: Factor for vibrational reactive source (default 1.0).
 
     Returns:
         ReactionTable with reactions that can be represented by the given species.
@@ -438,7 +445,6 @@ def load_reactions_from_json(
             if "n_ref_m3" in row:
                 n_ref = float(row["n_ref_m3"])
             elif "n_ref_cm3" in row:
-                # User-requested SI scaling: cm^3 -> m^3
                 n_ref = float(row["n_ref_cm3"]) * 1e6
             else:
                 raise ValueError("Casseau coeff row missing n_ref_cm3/n_ref_m3.")
@@ -516,19 +522,16 @@ def load_reactions_from_json(
             1.0 if rxn.get("is_electron_impact", False) else 0.0
         )
 
-    # Convert Arrhenius prefactors from per-molecule to per-mol units.
+    # Convert Arrhenius prefactors from per-molecule to per-mol units for molar formulation.
     reaction_order = jnp.sum(reactant_stoich, axis=1)
     C_f = C_f * jnp.power(constants.N_A, reaction_order - 1.0)
 
-
-    if chemistry_model_config.model.lower() == "cvdv_qp":
-        chemistry_model = chemistry.build_cvdv_qp_chemistry_model()
-    elif chemistry_model_config.model.lower() == "park":
-        chemistry_model = chemistry.build_park_chemistry_model()
-    else:
-        raise ValueError(
-            f"Unsupported chemistry model: {chemistry_model_config.model}"
-        )
+    chemistry_model = reaction_rates.build_chemistry_model_from_config(
+        config=chemistry_model_config,
+        species_table=species_table,  # not needed here
+        net_stoich=product_stoich - reactant_stoich,
+        is_dissociation=is_dissociation,
+    )
 
     return ReactionTable(
         species_names=tuple(species_names),
@@ -540,6 +543,7 @@ def load_reactions_from_json(
         equilibrium_coeffs_casseau=equilibrium_coeffs_casseau,
         is_dissociation=is_dissociation,
         is_electron_impact=is_electron_impact,
+        preferential_factor=preferential_factor,
         chemistry_model=chemistry_model,
     )
 
