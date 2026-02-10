@@ -102,8 +102,8 @@ class SpeciesTable:
         assert self.ionization_energy.shape == (
             n_sp,
         ), f"ionization_energy shape {self.ionization_energy.shape} != ({n_sp},)"
-        assert (
-            self.vibrational_relaxation_factor.shape == (n_sp,)
+        assert self.vibrational_relaxation_factor.shape == (
+            n_sp,
         ), f"vibrational_relaxation_factor shape {self.vibrational_relaxation_factor.shape} != ({n_sp},)"
         n_mol = self.vibrational_relaxation_molecule_indices.shape[0]
         n_partners = self.vibrational_relaxation_partner_indices.shape[0]
@@ -233,7 +233,9 @@ class ChemistryModelConfig:
     """Configuration for selecting chemical kinetics models."""
 
     model: Literal["park", "cvdv_qp"] = "park"
-    park_vibrational_source: Literal["energy", "qp_constant"] = "energy"
+    park_vibrational_source: Literal["nonpreferential", "preferential_constant"] = (
+        "preferential_constant"
+    )
     qp_constant: float = 0.3
 
 
@@ -270,8 +272,8 @@ class ReactionTable:
     equilibrium_coeffs_casseau: Float[jt.Array, "n_reactions n_refs 6"]
 
     # Reaction type flags
-    is_dissociation: Float[jt.Array, " n_reactions"] 
-    is_electron_impact: Float[jt.Array, " n_reactions"] 
+    is_dissociation: Float[jt.Array, " n_reactions"]
+    is_electron_impact: Float[jt.Array, " n_reactions"]
 
     chemistry_model: ChemistryModel = field(metadata=dict(static=True))
 
@@ -281,19 +283,13 @@ class ReactionTable:
         n_species = len(self.species_names)
 
         # Check stoichiometry shapes
-        assert (
-            self.reactant_stoich.shape
-            == (
-                n_reactions,
-                n_species,
-            )
+        assert self.reactant_stoich.shape == (
+            n_reactions,
+            n_species,
         ), f"reactant_stoich shape {self.reactant_stoich.shape} != ({n_reactions}, {n_species})"
-        assert (
-            self.product_stoich.shape
-            == (
-                n_reactions,
-                n_species,
-            )
+        assert self.product_stoich.shape == (
+            n_reactions,
+            n_species,
         ), f"product_stoich shape {self.product_stoich.shape} != ({n_reactions}, {n_species})"
 
         # Check Arrhenius parameter shapes
@@ -321,8 +317,8 @@ class ReactionTable:
         assert self.is_dissociation.shape == (
             n_reactions,
         ), f"is_dissociation shape {self.is_dissociation.shape} != ({n_reactions},)"
-        assert (
-            self.is_electron_impact.shape == (n_reactions,)
+        assert self.is_electron_impact.shape == (
+            n_reactions,
         ), f"is_electron_impact shape {self.is_electron_impact.shape} != ({n_reactions},)"
 
     @property
@@ -340,7 +336,9 @@ class ReactionTable:
         """Net stoichiometric coefficients."""
         return self.product_stoich - self.reactant_stoich
 
-    def with_chemistry_model(self, chemistry_model: "ChemistryModel") -> "ReactionTable":
+    def with_chemistry_model(
+        self, chemistry_model: "ChemistryModel"
+    ) -> "ReactionTable":
         """Return a new ReactionTable with a different chemistry model."""
         return dataclasses.replace(self, chemistry_model=chemistry_model)
 

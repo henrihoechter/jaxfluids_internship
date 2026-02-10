@@ -524,7 +524,7 @@ def load_reactions_from_json(
     if chemistry_model_config.model.lower() == "cvdv_qp":
         chemistry_model = chemistry.build_cvdv_qp_chemistry_model()
     elif chemistry_model_config.model.lower() == "park":
-        chemistry_model = chemistry.build_park_chemistry_model()
+        chemistry_model = chemistry.build_park_chemistry_model(chemistry_model_config)
     else:
         raise ValueError(
             f"Unsupported chemistry model: {chemistry_model_config.model}"

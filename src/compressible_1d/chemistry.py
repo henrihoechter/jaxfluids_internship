@@ -10,7 +10,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from compressible_1d import chemistry_types, constants
+from compressible_1d import chemistry_types, constants, thermodynamic_relations
 from compressible_1d.chemistry_types import ChemistryModel, ChemistryModelConfig
 
 # Fixed level count for JAX-static vibrational sums
@@ -394,22 +394,70 @@ def build_cvdv_qp_chemistry_model() -> chemistry_types.ChemistryModel:
     )
 
 
-def build_park_chemistry_model() -> chemistry_types.ChemistryModel:
-    """Placeholder chemistry model for Park."""
+def build_park_chemistry_model(
+    config: ChemistryModelConfig | None = None,
+) -> chemistry_types.ChemistryModel:
+    """Build the Park chemistry model (Arrhenius + Park vibrational source)."""
+    if config is None:
+        config = ChemistryModelConfig()
 
-    def _not_implemented_forward(*_args, **_kwargs) -> Float[Array, "n_reactions n_cells"]:
-        raise NotImplementedError(
-            "Park chemistry model is not implemented in src/compressible_1d/chemistry.py."
+    park_alpha = 0.7
+
+    def forward_rate_coefficient(
+        T: Float[Array, " n_cells"],
+        T_v: Float[Array, " n_cells"],
+        species_table: chemistry_types.SpeciesTable,
+        reaction_table: chemistry_types.ReactionTable,
+    ) -> Float[Array, "n_reactions n_cells"]:
+        n_reactions = reaction_table.n_reactions
+        n_cells = T.shape[0]
+        T_tr_rc = jnp.broadcast_to(T[None, :], (n_reactions, n_cells))
+        T_v_rc = jnp.broadcast_to(T_v[None, :], (n_reactions, n_cells))
+
+        is_dissoc = reaction_table.is_dissociation > 0.5
+        is_eid = reaction_table.is_electron_impact > 0.5
+
+        T_p = jnp.power(T_tr_rc, park_alpha) * jnp.power(T_v_rc, 1.0 - park_alpha)
+        T_control = jnp.where(is_dissoc[:, None], T_p, T_tr_rc)
+        T_control = jnp.where(is_eid[:, None], T_v_rc, T_control)
+
+        return arrhenius_rate(
+            T_control, reaction_table.C_f, reaction_table.n_f, reaction_table.E_f_over_k
         )
 
-    def _not_implemented_vibrational(*_args, **_kwargs) -> Float[Array, " n_cells"]:
-        raise NotImplementedError(
-            "Park chemistry model is not implemented in src/compressible_1d/chemistry.py."
-        )
+    def vibrational_reactive_source(
+        rho_s: Float[Array, "n_cells n_species"],
+        omega_dot_f: Float[Array, "n_cells n_species"],
+        omega_dot_b: Float[Array, "n_cells n_species"],
+        T: Float[Array, " n_cells"],
+        T_v: Float[Array, " n_cells"],
+        species_table: chemistry_types.SpeciesTable,
+        reaction_table: chemistry_types.ReactionTable,
+    ) -> Float[Array, " n_cells"]:
+        del rho_s, T, reaction_table
+        # Use only dissociation contributions (omega_dot_f/b already masked).
+        omega_dot_dissoc = omega_dot_f - omega_dot_b  # [n_cells, n_species]
+
+        if config.park_vibrational_source == "nonpreferential":
+            D0 = thermodynamic_relations.compute_e_vib(T_v, species_table)  # [J/kg]
+            source = omega_dot_dissoc * D0.T
+        elif config.park_vibrational_source == "preferential_constant":
+            D_m = species_table.dissociation_energy  # [J/kg]
+            D_m = jnp.where(jnp.isfinite(D_m), D_m, 0.0)
+            e_el = thermodynamic_relations.compute_e_el(T_v, species_table)  # [J/kg]
+            D0 = config.qp_constant * D_m[:, None]
+            source = omega_dot_dissoc * (D0 + e_el).T
+        else:
+            raise ValueError(
+                f"Unknown park_vibrational_source '{config.park_vibrational_source}'."
+            )
+
+        # Sum over species to get total source term.
+        return jnp.sum(source, axis=1)
 
     return ChemistryModel(
-        forward_rate_coefficient=_not_implemented_forward,
-        vibrational_reactive_source=_not_implemented_vibrational,
+        forward_rate_coefficient=forward_rate_coefficient,
+        vibrational_reactive_source=vibrational_reactive_source,
     )
 
 

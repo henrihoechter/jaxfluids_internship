@@ -28,9 +28,9 @@
       },
       "is_dissociation": true,
       "is_electron_impact": false,
-      "C_f": 4.101e-12,
-      "n_f": -0.62,
-      "E_f_over_k": 113500.0
+      "C_f": 1.1623e-8,
+      "n_f": -1.6,
+      "E_f_over_k": 113200.0
     }
   ],
   "equilibrium_coeffs_casseau": [
