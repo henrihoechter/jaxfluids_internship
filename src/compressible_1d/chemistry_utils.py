@@ -2,14 +2,14 @@ import json
 from pathlib import Path
 from typing import Sequence
 import jax.numpy as jnp
-from jaxtyping import Float, Array
+from jaxtyping import Float, Array, Int
 
 
 from compressible_1d.chemistry_types import SpeciesTable, ReactionTable
 from compressible_1d import (
     constants,
     energy_models,
-    reaction_rates,
+    chemistry,
     chemistry_types,
 )
 
@@ -29,9 +29,9 @@ def _load_h_s0(entry: dict) -> float:
 
 
 def _load_dissociation_energy(entry: dict) -> float | None:
-    """Convert dissociation energy from eV to J."""
+    """Load dissociation energy in J/kg."""
     if entry.get("dissociation_energy") is not None:
-        return entry["dissociation_energy"] * constants.e
+        return float(entry["dissociation_energy"])
     return None
 
 
@@ -50,6 +50,93 @@ def _select_species_entries(
     if missing:
         raise ValueError(f"Species not found in data: {missing}")
     return [entries[name] for name in species_names]
+
+
+def _extract_vibrational_relaxation_scalar(
+    species_name: str, raw_value: object
+) -> float | None:
+    """Return a per-species scalar for backward compatibility."""
+    if isinstance(raw_value, dict):
+        self_pair = raw_value.get(species_name, None)
+        if isinstance(self_pair, dict):
+            a_value = self_pair.get("a")
+            return float(a_value) if a_value is not None else None
+        return None
+    if raw_value is None:
+        return None
+    return float(raw_value)
+
+
+def _build_vibrational_relaxation_tables(
+    names: Sequence[str],
+    charge: Float[Array, " n_species"],
+    is_monoatomic: Float[Array, " n_species"],
+    vibrational_relaxation_raw: Sequence[object],
+) -> tuple[
+    Float[Array, " n_molecules n_partners"],
+    Float[Array, " n_molecules n_partners"],
+    Int[Array, " n_molecules"],
+    Int[Array, " n_partners"],
+]:
+    non_e_indices = [i for i, c in enumerate(charge.tolist()) if c != -1]
+    molecule_indices = [i for i, mono in enumerate(is_monoatomic.tolist()) if not mono]
+    non_e_names = [names[i] for i in non_e_indices]
+
+    a_rows: list[list[float]] = []
+    b_rows: list[list[float]] = []
+    missing: dict[str, list[str]] = {}
+
+    for m_idx in molecule_indices:
+        m_name = names[m_idx]
+        raw_value = vibrational_relaxation_raw[m_idx]
+        if isinstance(raw_value, dict):
+            row_a: list[float] = []
+            row_b: list[float] = []
+            missing_partners: list[str] = []
+            for s_name in non_e_names:
+                pair_entry = raw_value.get(s_name, None)
+                if (
+                    not isinstance(pair_entry, dict)
+                    or pair_entry.get("a") is None
+                    or pair_entry.get("b") is None
+                ):
+                    missing_partners.append(s_name)
+                else:
+                    row_a.append(float(pair_entry["a"]))
+                    row_b.append(float(pair_entry["b"]))
+            if missing_partners:
+                missing[m_name] = missing_partners
+            else:
+                a_rows.append(row_a)
+                b_rows.append(row_b)
+        elif raw_value is None:
+            missing[m_name] = non_e_names
+        else:
+            a_rows.append([float(raw_value)] * len(non_e_names))
+            b_rows.append([jnp.nan] * len(non_e_names))
+
+    if missing:
+        details = "; ".join(
+            f"{name}: {partners}" for name, partners in missing.items()
+        )
+        raise ValueError(
+            "Missing vibrational relaxation factors for collision partners: "
+            f"{details}"
+        )
+
+    if non_e_names:
+        a_ms = jnp.array(a_rows) if a_rows else jnp.zeros((0, len(non_e_names)))
+        b_ms = jnp.array(b_rows) if b_rows else jnp.zeros((0, len(non_e_names)))
+    else:
+        a_ms = jnp.zeros((len(molecule_indices), 0))
+        b_ms = jnp.zeros((len(molecule_indices), 0))
+
+    return (
+        a_ms,
+        b_ms,
+        jnp.array(molecule_indices, dtype=int),
+        jnp.array(non_e_indices, dtype=int),
+    )
 
 
 def load_equilibrium_enthalpy_curve_fits(json_path: str, species_name: str) -> tuple[
@@ -125,6 +212,7 @@ def load_species_table(
     dissociation_energy = []
     ionization_energy = []
     vibrational_relaxation_factor = []
+    vibrational_relaxation_raw = []
     charge = []
     sigma_es_a = []
     sigma_es_b = []
@@ -149,9 +237,13 @@ def load_species_table(
         ionization_energy.append(
             ionization_energy_value if ionization_energy_value is not None else jnp.nan
         )
+        vibrational_relaxation_raw.append(vibrational_relaxation_value)
+        vibrational_relaxation_scalar = _extract_vibrational_relaxation_scalar(
+            entry["name"], vibrational_relaxation_value
+        )
         vibrational_relaxation_factor.append(
-            vibrational_relaxation_value
-            if vibrational_relaxation_value is not None
+            vibrational_relaxation_scalar
+            if vibrational_relaxation_scalar is not None
             else jnp.nan
         )
         charge.append(entry.get("charge", 0))
@@ -172,6 +264,15 @@ def load_species_table(
 
     is_monoatomic = ~jnp.isfinite(dissociation_energy)
     T_ref = 298.16
+
+    (
+        vibrational_relaxation_a_ms,
+        vibrational_relaxation_b_ms,
+        vibrational_relaxation_molecule_indices,
+        vibrational_relaxation_partner_indices,
+    ) = _build_vibrational_relaxation_tables(
+        names_tuple, charge, is_monoatomic, vibrational_relaxation_raw
+    )
 
     energy_model = energy_models.build_energy_model_from_config(
         energy_model_config,
@@ -194,6 +295,10 @@ def load_species_table(
         dissociation_energy=dissociation_energy,
         ionization_energy=ionization_energy,
         vibrational_relaxation_factor=vibrational_relaxation_factor,
+        vibrational_relaxation_a_ms=vibrational_relaxation_a_ms,
+        vibrational_relaxation_b_ms=vibrational_relaxation_b_ms,
+        vibrational_relaxation_molecule_indices=vibrational_relaxation_molecule_indices,
+        vibrational_relaxation_partner_indices=vibrational_relaxation_partner_indices,
         theta_vib=theta_vib,
         charge=charge,
         sigma_es_a=sigma_es_a,

@@ -16,6 +16,7 @@ from compressible_1d import viscous_flux as viscous_flux_module
 from compressible_1d import transport
 from compressible_1d import equation_manager_utils
 from compressible_1d import thermodynamic_relations
+from compressible_1d import constants, equation_manager_utils
 from compressible_1d.diagnose import runtime_check_array_sizes
 
 
@@ -187,19 +188,29 @@ def run_scan(
     equation_manager: equation_manager_types.EquationManager,
     t_final: float,
     save_interval: int = 100,
+    dt_array: Float[Array, "n_steps"] | None = None,
 ) -> tuple[
     Float[Array, "n_snapshots n_cells n_variables"], Float[Array, "n_snapshots"]
 ]:
-    """Run simulation from t=0 to t=t_final using jax.lax.scan."""
+    """Run simulation from t=0 to t=t_final using jax.lax.scan.
+
+    If dt_array is provided, its length defines n_steps and each entry is used
+    as the timestep for that step. t_final is ignored in that case.
+    """
     dt = equation_manager.numerics_config.dt
 
     # Number of steps/snapshots (static given dt/t_final/save_interval)
-    n_steps = int(t_final / dt)
+    if dt_array is None:
+        n_steps = int(t_final / dt)
+        dt_sequence = jnp.full((n_steps,), dt, dtype=jnp.result_type(dt, 0.0))
+    else:
+        n_steps = int(dt_array.shape[0])
+        dt_sequence = dt_array
     n_snapshots = int(n_steps // save_interval) + 1
 
     n_cells, n_variables = U_init.shape
     U_history0 = jnp.zeros((n_snapshots, n_cells, n_variables), dtype=U_init.dtype)
-    t_history0 = jnp.zeros((n_snapshots,), dtype=jnp.result_type(dt, 0.0))
+    t_history0 = jnp.zeros((n_snapshots,), dtype=jnp.result_type(dt_sequence, 0.0))
 
     # Write initial snapshot
     U_history0 = U_history0.at[0].set(U_init)
@@ -214,12 +225,13 @@ def run_scan(
         t_history0,
     )
 
-    def body(carry, step_idx):
+    def body(carry, xs):
+        dt_step, step_idx = xs
         U, t, snap_i, U_hist, t_hist = carry
 
         # Advance
-        U = advance_one_step(U, equation_manager)
-        t = t + dt
+        U = advance_one_step(U, equation_manager, dt_step)
+        t = t + dt_step
 
         # Save every save_interval steps
         save = (step_idx % save_interval) == 0  # step_idx is 1..n_steps
@@ -238,7 +250,9 @@ def run_scan(
 
     # Scan over steps 1..n_steps (so modulo matches your original for-loop)
     carry_final, _ = jax.lax.scan(
-        body, carry0, xs=jnp.arange(1, n_steps + 1, dtype=jnp.int32)
+        body,
+        carry0,
+        xs=(dt_sequence, jnp.arange(1, n_steps + 1, dtype=jnp.int32)),
     )
     _, _, _, U_history, t_history = carry_final
     return U_history, t_history
@@ -248,6 +262,7 @@ def run_scan(
 def advance_one_step(
     U: Float[Array, "n_cells n_variables"],
     equation_manager: equation_manager_types.EquationManager,
+    dt: float | Array | None = None,
 ) -> Float[Array, "n_cells n_variables"]:
     """Advance solution by one time step using Strang splitting.
 
@@ -264,7 +279,8 @@ def advance_one_step(
     Returns:
         U_next: Updated state [n_cells, n_variables]
     """
-    dt = equation_manager.numerics_config.dt
+    if dt is None:
+        dt = equation_manager.numerics_config.dt
 
     # Step 1: Half-step source terms (vibrational relaxation)
     S = source_terms.compute_source_terms(U, equation_manager)
@@ -275,7 +291,7 @@ def advance_one_step(
     dU_dt_convective = compute_dU_dt_convective(U_with_halo, equation_manager)
     dU_dt_diffusive = compute_dU_dt_diffusive(U_with_halo, equation_manager)
     dU_dt = dU_dt_convective + dU_dt_diffusive
-    U = integrate_in_time(U, dU_dt, equation_manager)
+    U = integrate_in_time(U, dU_dt, equation_manager, dt)
 
     # Step 3: Half-step source terms
     S = source_terms.compute_source_terms(U, equation_manager)
@@ -459,6 +475,7 @@ def integrate_in_time(
     U: Float[Array, "n_cells n_variables"],
     dU_dt: Float[Array, "n_cells n_variables"],
     equation_manager: equation_manager_types.EquationManager,
+    dt: float | Array | None = None,
 ) -> Float[Array, "n_cells n_variables"]:
     """Integrate in time using specified scheme.
 
@@ -470,7 +487,8 @@ def integrate_in_time(
     Returns:
         U_next: Updated state [n_cells, n_variables]
     """
-    dt = equation_manager.numerics_config.dt
+    if dt is None:
+        dt = equation_manager.numerics_config.dt
 
     if equation_manager.numerics_config.integrator_scheme == "forward-euler":
         return U + dt * dU_dt

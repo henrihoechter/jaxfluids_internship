@@ -279,7 +279,7 @@ def compute_viscous_flux(
     dT_dx = compute_gradients_at_interfaces(T, dx)
     dTv_dx = compute_gradients_at_interfaces(T_v, dx)
     # dc_s_dx = compute_gradients_at_interfaces_multispecies(c_s, dx)
-    dy_s_dx = compute_gradients_at_interfaces_multispecies(Y_s, dx)
+    dc_s_dx = compute_gradients_at_interfaces_multispecies(c_s, dx)
 
     # Interpolate transport properties to interfaces
     mu_face = compute_interface_values(mu)
@@ -295,7 +295,7 @@ def compute_viscous_flux(
 
     # Compute species diffusion flux at interfaces
     # j_s = compute_species_diffusion_flux(rho_face, D_s_face, dc_s_dx)
-    j_s = rho_face[:, None] * D_s_face * dy_s_dx
+    j_s = rho_face[:, None] * D_s_face * dc_s_dx
 
     # Compute viscous stress at interfaces
     # tau = compute_viscous_stress_1d(du_dx, mu_face)

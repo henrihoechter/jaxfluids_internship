@@ -21,7 +21,7 @@ class ClippingConfig:
     T_max: float = 50000.0
     Tv_min: float = 100.0
     Tv_max: float = 50000.0
-    Y_min: float = 0.0  # Mass fractions
+    Y_min: float = 0.0  # Mole fractions
     Y_max: float = 1.0
 
     # Conserved variables

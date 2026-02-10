@@ -4,40 +4,169 @@
         "charge": 0,
         "molar_mass": 14.0,
         "h_s0": 112.951,
-        "ionization_energy": 14.53
+        "ionization_energy": 14.53,
+        "sigma_es_a": 5.0e-20,
+        "sigma_es_b": 0.0,
+        "sigma_es_c": 0.0
     },
     {
         "name": "O",
         "charge": 0,
         "molar_mass": 16.0,
         "h_s0": 59.544,
-        "ionization_energy": 13.614
+        "ionization_energy": 13.614,
+        "sigma_es_a": 1.2e-20,
+        "sigma_es_b": 1.7e-24,
+        "sigma_es_c": -2.0e-29
     },
     {
         "name": "N2",
         "charge": 0,
         "molar_mass": 28.0,
         "h_s0": 0.0,
-        "dissociation_energy": 9.759,
+        "dissociation_energy": 3.36e7,
         "ionization_energy": 15.51,
-        "vibrational_relaxation_factor": 220
+        "vibrational_relaxation_factor": {
+            "N": {
+                "a": 180.0,
+                "b": 0.0262,
+                "source": "Eq.(3)"
+            },
+            "O": {
+                "a": 72.4,
+                "b": 0.0150,
+                "source": "Ref.15"
+            },
+            "N2": {
+                "a": 221.0,
+                "b": 0.0290,
+                "source": "Eq.(3)"
+            },
+            "O2": {
+                "a": 229.0,
+                "b": 0.0295,
+                "source": "Eq.(3)"
+            },
+            "NO": {
+                "a": 225.0,
+                "b": 0.0293,
+                "source": "Eq.(3)"
+            }
+        },
+        "sigma_es_a": 7.5e-20,
+        "sigma_es_b": 5.5e-24,
+        "sigma_es_c": -1.0e-28
     },
     {
         "name": "O2",
         "charge": 0,
         "molar_mass": 32.0,
         "h_s0": 0.0,
-        "dissociation_energy": 5.115,
+        "dissociation_energy": 1.54e7,
         "ionization_energy": 12.5,
-        "vibrational_relaxation_factor": 129
+        "vibrational_relaxation_factor": {
+            "N": {
+                "a": 72.4,
+                "b": 0.0150,
+                "source": "Assumed same as N2-O"
+            },
+            "O": {
+                "a": 47.7,
+                "b": 0.0590,
+                "source": "Ref.16"
+            },
+            "N2": {
+                "a": 134.0,
+                "b": 0.0295,
+                "source": "Eq.(3)"
+            },
+            "O2": {
+                "a": 138.0,
+                "b": 0.0300,
+                "source": "Eq.(3)"
+            },
+            "NO": {
+                "a": 136.0,
+                "b": 0.0298,
+                "source": "Eq.(3)"
+            }
+        },
+        "sigma_es_a": 2.0e-20,
+        "sigma_es_b": 6.0e-24,
+        "sigma_es_c": 0.0
     },
     {
         "name": "NO",
         "charge": 0,
         "molar_mass": 30.0,
         "h_s0": 21.6009,
-        "dissociation_energy": 6.496,
+        "dissociation_energy": 2.09e7,
         "ionization_energy": 9.5,
-        "vibrational_relaxation_factor": 168
+        "vibrational_relaxation_factor": {
+            "N": {
+                "a": 49.5,
+                "b": 0.0420,
+                "source": "Assumed same as NO-NO"
+            },
+            "O": {
+                "a": 49.5,
+                "b": 0.0420,
+                "source": "Assumed same as NO-NO"
+            },
+            "N2": {
+                "a": 49.5,
+                "b": 0.0420,
+                "source": "Assumed same as NO-NO"
+            },
+            "O2": {
+                "a": 49.5,
+                "b": 0.0420,
+                "source": "Assumed same as NO-NO"
+            },
+            "NO": {
+                "a": 49.5,
+                "b": 0.0420,
+                "source": "Ref.17"
+            }
+        },
+        "sigma_es_a": 1.0e-19,
+        "sigma_es_b": 0.0,
+        "sigma_es_c": 0.0
+    },
+    {
+        "name": "N+",
+        "charge": 1,
+        "molar_mass": 14.0,
+        "h_s0": 449.709
+    },
+    {
+        "name": "O+",
+        "charge": 1,
+        "molar_mass": 16.0,
+        "h_s0": 374.867
+    },
+    {
+        "name": "N2+",
+        "charge": 1,
+        "molar_mass": 28.0,
+        "h_s0": 364.9392
+    },
+    {
+        "name": "O2+",
+        "charge": 1,
+        "molar_mass": 32.0,
+        "h_s0": 280.2099
+    },
+    {
+        "name": "NO+",
+        "charge": 1,
+        "molar_mass": 30.0,
+        "h_s0": 237.3239
+    },
+    {
+        "name": "e-",
+        "charge": -1,
+        "molar_mass": 0.0005486,
+        "h_s0": 0.0
     }
 ]

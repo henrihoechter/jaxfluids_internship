@@ -216,7 +216,7 @@ def compute_speed_of_sound(
     Args:
         rho: Density [n_cells]
         p: Pressure [n_cells]
-        Y_s: Mass fractions [n_cells, n_species]
+        Y_s: Mole fractions [n_cells, n_species]
         T: Translational temperature [n_cells]
         Tv: Vibrational temperature [n_cells]
         equation_manager: Contains species data
@@ -232,9 +232,14 @@ def compute_speed_of_sound(
         T, equation_manager.species
     )  # [n_species, n_cells]
 
+    # Convert mole fractions to mass fractions for mass-based specific heats
+    M_s = equation_manager.species.molar_masses
+    Y_M = Y_s * M_s[None, :]
+    c_s = Y_M / jnp.sum(Y_M, axis=1, keepdims=True)
+
     # Mixture-averaged specific heats
-    cp_mix = jnp.sum(Y_s * cp.T, axis=1)  # [n_cells]
-    cv_tr_mix = jnp.sum(Y_s * cv_tr.T, axis=1)  # [n_cells]
+    cp_mix = jnp.sum(c_s * cp.T, axis=1)  # [n_cells]
+    cv_tr_mix = jnp.sum(c_s * cv_tr.T, axis=1)  # [n_cells]
 
     # Frozen specific heat ratio (two-temperature model)
     # γ_frozen = cp_mix / cv_tr_mix (vibrational modes frozen on short timescales)

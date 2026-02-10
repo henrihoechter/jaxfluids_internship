@@ -1,6 +1,6 @@
 """Source terms module for multi-species two-temperature equations.
 
-Implements vibrational relaxation and chemical reaction source terms.
+Implements vibrational relaxation source terms.
 """
 
 import jax.numpy as jnp
@@ -10,7 +10,7 @@ from compressible_1d import constants
 from compressible_1d import equation_manager_types
 from compressible_1d import equation_manager_utils
 from compressible_1d import thermodynamic_relations
-from compressible_1d import reaction_rates
+from compressible_1d import chemistry
 
 
 def compute_source_terms(
@@ -20,8 +20,7 @@ def compute_source_terms(
     """Compute all source terms: chemistry + vibrational relaxation.
 
     For frozen chemistry (reactions=None): only vibrational relaxation is active.
-    For reacting flow: includes species production, chemical energy, and
-    vibrational reactive source terms.
+    For reacting flow: includes species production and vibrational reactive source.
 
     Args:
         U: Conserved state [n_cells, n_variables]
@@ -31,7 +30,7 @@ def compute_source_terms(
         S: Source terms [n_cells, n_variables]
             S[:, 0:n_species] = ω̇_s (species mass production rates)
             S[:, n_species] = 0 (momentum, inviscid)
-            S[:, n_species+1] = Q_chem (chemical energy release)
+            S[:, n_species+1] = 0 (no chemical energy source)
             S[:, n_species+2] = Q_TV + Q_vib_chem (vibrational energy)
 
     Notes:
@@ -59,6 +58,7 @@ def compute_source_terms(
 
     # Term 6: Vibrational-translational relaxation
     Q_TV = compute_vibrational_relaxation(U, equation_manager)
+    # Q_TV = jnp.zeros_like(Q_TV) 
 
     Q_VV = jnp.zeros_like(Q_TV)  # TODO: implement vibrational-vibrational relaxation
     Q_eT = jnp.zeros_like(Q_TV)  # TODO: implement electron-translational relaxation
@@ -71,11 +71,55 @@ def compute_source_terms(
     # Q_ion = compute_electron_impact_ionization_loss(U, equation_manager)
 
     # Total source for vibrational-electronic energy (last variable = ρE_v)
-    # Includes: relaxation + chemical reactive source
     S = S.at[:, n_species + 2].set(Q_TV + Q_VV + Q_eT + Q_ion + Q_vib_chem)
-    # S = S.at[:, n_species + 2].set(Q_vib_chem)
 
     return S
+
+
+def compute_chemical_source(
+    U: Float[Array, "n_cells n_variables"],
+    equation_manager: equation_manager_types.EquationManager,
+) -> tuple[
+    Float[Array, "n_cells n_species"],
+    Float[Array, " n_cells"],
+]:
+    """Compute chemical reaction source terms.
+
+    For frozen chemistry (reactions=None): returns zeros.
+    For reacting flow: computes species production rates and vibrational reactive source.
+
+    Args:
+        U: Conserved state [n_cells, n_variables]
+        equation_manager: Contains species table and reaction data
+
+    Returns:
+        omega_dot: Species mass production rates [kg/m³/s]. Shape [n_cells, n_species].
+        Q_vib_chem: Vibrational reactive source [W/m³]. Shape [n_cells].
+    """
+    n_cells = U.shape[0]
+    n_species = equation_manager.species.n_species
+
+    if equation_manager.reactions is None:
+        omega_dot = jnp.zeros((n_cells, n_species))
+        Q_vib_chem = jnp.zeros(n_cells)
+        return omega_dot, Q_vib_chem
+
+    # Extract primitives (only need T and T_v for rate calculations)
+    _, _, T, T_v, _ = equation_manager_utils.extract_primitives_from_U(
+        U, equation_manager
+    )
+
+    rho_s = U[:, :n_species]
+
+    omega_dot, Q_vib_chem = chemistry.compute_all_chemical_sources(
+        rho_s=rho_s,
+        T=T,
+        T_v=T_v,
+        species_table=equation_manager.species,
+        reaction_table=equation_manager.reactions,
+    )
+
+    return omega_dot, Q_vib_chem
 
 
 def compute_vibrational_relaxation(
@@ -85,7 +129,7 @@ def compute_vibrational_relaxation(
     """Compute vibrational relaxation source term Q_dot_v.
 
     Per-species summation (each species relaxes at its own rate):
-        Q_dot_v = Σ_s [rho * Y_s * (e_v_s(T) - e_v_s(T_v)) / tau_s]
+        Q_dot_v = Σ_s [rho * c_s * (e_v_s(T) - e_v_s(T_v)) / tau_s]
 
     where:
     - e_v_s(T): equilibrium vibrational energy of species s at temperature T
@@ -115,16 +159,20 @@ def compute_vibrational_relaxation(
 
     # Compute per-species relaxation time
     # Shape: [n_species, n_cells]
-    tau_v = compute_relaxation_time(Y_s, rho, T, T_v, p, equation_manager)
+    # tau_v = compute_relaxation_time(Y_s, rho, T, T_v, p, equation_manager)
+    tau_v = compute_relaxation_time_2_casseau(Y_s, rho, T, p, equation_manager)
 
     # Compute per-species energy difference
     # delta_e_v_s has shape [n_species, n_cells]
     delta_e_v_s = e_v_eq_species - e_v_actual_species  # [n_species, n_cells]
 
-    # Compute per-species relaxation rate: Q_s = rho * Y_s * delta_e_v_s / tau_s
+    # Compute per-species relaxation rate: Q_s = rho * c_s * delta_e_v_s / tau_s
     # Atoms have tau = 1e30, so their contribution is effectively zero
-    # Y_s has shape [n_cells, n_species], need to transpose for broadcasting
-    Q_s = rho[None, :] * Y_s.T * delta_e_v_s / (tau_v + 1e-30)  # [n_species, n_cells]
+    # c_s has shape [n_cells, n_species], need to transpose for broadcasting
+    M_s = equation_manager.species.molar_masses
+    Y_M = Y_s * M_s[None, :]
+    c_s = Y_M / jnp.sum(Y_M, axis=1, keepdims=True)
+    Q_s = rho[None, :] * c_s.T * delta_e_v_s / (tau_v + 1e-30)  # [n_species, n_cells]
 
     # Sum over all species (atoms contribute ~0 due to large tau and zero delta_e_v)
     Q_dot_v = jnp.sum(Q_s, axis=0)  # [n_cells]
@@ -154,7 +202,7 @@ def compute_relaxation_time(
         <tau_s> = tau_s^MW + tau_s^P
 
     Args:
-        Y_s: Mass fractions [n_cells n_species]
+        Y_s: Mole fractions [n_cells n_species]
         rho: Density [n_cells]
         T: Translational temperature [n_cells]
         T_v: Vibrational temperature [n_cells]
@@ -174,9 +222,12 @@ def compute_relaxation_time(
     A_s = species.vibrational_relaxation_factor  # [-], NaN for atoms
     is_monoatomic = species.is_monoatomic  # [n_species]
 
-    # Compute number densities n_j = rho * Y_s * N_A / M_s
+    # Convert mole fractions to number densities
+    # n_total = rho * N_A / M_mix, n_j = X_j * n_total
     # n_j has shape [n_cells, n_species]
-    n_j = rho[:, None] * Y_s * constants.N_A / M_s[None, :]  # [1/m³]
+    M_mix = jnp.sum(Y_s * M_s[None, :], axis=1)  # [kg/mol]
+    n_total = rho * constants.N_A / (M_mix + 1e-30)  # [1/m³]
+    n_j = Y_s * n_total[:, None]
 
     # Total number density
     # TODO: this does not reflect electrons to not be considered
@@ -270,56 +321,93 @@ def compute_relaxation_time(
     return tau_v.T
 
 
-def compute_chemical_source(
-    U: Float[Array, "n_cells n_variables"],
+def compute_relaxation_time_2_casseau(
+    Y_s: Float[Array, "n_cells n_species"],
+    rho: Float[Array, "n_cells"],
+    T: Float[Array, "n_cells"],
+    p: Float[Array, "n_cells"],
     equation_manager: equation_manager_types.EquationManager,
-) -> tuple[
-    Float[Array, "n_cells n_species"],
-    Float[Array, " n_cells"],
-]:
-    """Compute chemical reaction source terms.
+) -> Float[Array, "n_species n_cells"]:
+    """Compute vibrational relaxation time using pairwise Park data (Casseau).
 
-    For frozen chemistry (reactions=None): returns zeros.
-    For reacting flow: computes species production rates, chemical energy,
-    and vibrational reactive source.
+    Pairwise (molecular species m, collision partner s):
+        tau_m-s = tau_m-s^MW + tau_m-s^P
+        tau_m-s^P = 1 / (cbar_m * sigma_v,m * n_s)
 
-    Args:
-        U: Conserved state [n_cells, n_variables]
-        equation_manager: Contains species table and reaction data
+    Mixture average (for each vibrating species m):
+        tau_m = (sum_s X_s) / (sum_s X_s / tau_m-s)
 
-    Returns:
-        omega_dot: Species mass production rates [kg/m³/s]. Shape [n_cells, n_species].
-        Q_chem: Chemical energy source [W/m³]. Shape [n_cells].
-        Q_vib_chem: Vibrational reactive source [W/m³]. Shape [n_cells].
+    Notes:
+    - Assumes Y_s are mole fractions X_s.
+    - Electrons are excluded from collision partners.
+    - Only molecular species are used for tau_m-s; atoms and electrons get tau = 1e30.
     """
-    n_cells = U.shape[0]
-    n_species = equation_manager.species.n_species
+    species = equation_manager.species
+    n_cells = T.shape[0]
 
-    # Check if reactions are defined
-    if equation_manager.reactions is None:
-        # Frozen chemistry: no reactions
-        omega_dot = jnp.zeros((n_cells, n_species))
-        Q_vib_chem = jnp.zeros(n_cells)
+    M_s = species.molar_masses  # [kg/mol]
 
-    else:
-        # Extract primitives (only need T and T_v for rate calculations)
-        _, _, T, T_v, _ = equation_manager_utils.extract_primitives_from_U(
-            U, equation_manager
-        )
+    molecule_indices = species.vibrational_relaxation_molecule_indices
+    partner_indices = species.vibrational_relaxation_partner_indices
+    a_ms = species.vibrational_relaxation_a_ms  # [m, s]
+    b_ms = species.vibrational_relaxation_b_ms  # [m, s]
 
-        # Get partial densities directly from conserved variables
-        rho_s = U[:, :n_species]  # [n_cells, n_species]
+    # --- Number densities ---
+    M_mix = jnp.sum(Y_s * M_s[None, :], axis=1)  # [kg/mol]
+    n_tot = rho * constants.N_A / (M_mix + 1e-300)  # [n_cells] 1/m^3
+    n_s = Y_s * n_tot[:, None]  # [n_cells, n_species] 1/m^3
 
-        # Compute all chemical sources using reaction_rates module
-        omega_dot, Q_vib_chem = reaction_rates.compute_all_chemical_sources(
-            rho_s=rho_s,
-            T=T,
-            T_v=T_v,
-            species_table=equation_manager.species,
-            reaction_table=equation_manager.reactions,
-        )
+    X_s = jnp.take(Y_s, partner_indices, axis=1)  # [n_cells, s]
+    n_partner = jnp.take(n_s, partner_indices, axis=1)  # [n_cells, s]
 
-    return omega_dot, Q_vib_chem
+    # Pressure in atm (MW formula uses atm)
+    p_atm = p / constants.ATM_TO_PA
+
+    # --- Reduced masses in "amu" = g/mol for molecules vs partners ---
+    M_m = jnp.take(M_s, molecule_indices)  # [m]
+    M_p = jnp.take(M_s, partner_indices)  # [s]
+    M_m_amu = M_m * 1000.0  # kg/mol -> g/mol
+    M_p_amu = M_p * 1000.0  # kg/mol -> g/mol
+    mu_ms = (M_m_amu[:, None] * M_p_amu[None, :]) / (
+        M_m_amu[:, None] + M_p_amu[None, :] + 1e-30
+    )  # [m, s]
+
+    b_default = 0.015 * mu_ms**0.25
+    b_ms = jnp.where(jnp.isnan(b_ms), b_default, b_ms)
+    a_ms = jnp.where(jnp.isnan(a_ms), 0.0, a_ms)
+
+    T_term = T ** (-1.0 / 3.0)  # [n_cells]
+
+    # tau_MW[cell, m, s] = (1/p_atm) * exp(a_ms * (T^-1/3 - b_ms) - 18.42)
+    exp_arg = a_ms[None, :, :] * (T_term[:, None, None] - b_ms[None, :, :]) - 18.42
+    exp_arg = jnp.clip(exp_arg, -700.0, 700.0)
+    tau_mw_ms = jnp.exp(exp_arg) / jnp.clip(p_atm, 1e-300, None)[:, None, None]
+
+    # --- Park correction, computed pairwise (m,s) ---
+    sigma_m = 3e-21  # [m^2], Casseau
+    sigma_v = sigma_m * (50000.0 / jnp.clip(T, 1e-12, None)) ** 2  # [n_cells] m^2
+
+    cbar_m = jnp.sqrt(
+        8.0 * constants.R_universal * T[:, None] / (jnp.pi * (M_m[None, :] + 1e-300))
+    )  # [n_cells, m]
+
+    denom_p = (
+        cbar_m[:, :, None]
+        * sigma_v[:, None, None]
+        * jnp.clip(n_partner[:, None, :], 1e-300, None)
+    )
+    tau_p_ms = 1.0 / (denom_p + 1e-300)  # [cells, m, s]
+
+    tau_ms = tau_mw_ms + tau_p_ms  # [cells, m, s]
+
+    num = jnp.sum(X_s, axis=1)  # [cells]
+    denom = jnp.sum(X_s[:, None, :] / jnp.clip(tau_ms, 1e-300, None), axis=2)
+    tau_mix = num[:, None] / jnp.clip(denom, 1e-300, None)  # [cells, m]
+
+    tau_full = jnp.full((species.n_species, n_cells), 1e30)
+    tau_full = tau_full.at[molecule_indices, :].set(tau_mix.T)
+
+    return tau_full
 
 
 def compute_electron_neutral_collision_frequency(
@@ -467,14 +555,17 @@ def compute_eT_relaxation(
     )
 
     # Electron properties
-    Y_e = Y_s[:, electron_idx]
-    rho_e = rho * Y_e  # Electron density [kg/m³]
+    M_s = species.molar_masses
+    Y_M = Y_s * M_s[None, :]
+    c_s = Y_M / jnp.sum(Y_M, axis=1, keepdims=True)
+    c_e = c_s[:, electron_idx]
+    rho_e = rho * c_e  # Electron density [kg/m³]
     M_e = species.molar_masses[electron_idx]  # Electron molar mass [kg/mol]
     n_e = rho_e * constants.N_A / M_e  # Electron number density [1/m³]
     T_e = T_v  # In 2-temp model, T_e = T_v
 
     # Compute number densities for all species [n_cells, n_species]
-    n_s = rho[:, None] * Y_s * constants.N_A / species.molar_masses[None, :]
+    n_s = rho[:, None] * c_s * constants.N_A / species.molar_masses[None, :]
 
     # Initialize collision frequencies to zero
     nu_es = jnp.zeros((n_cells, species.n_species))

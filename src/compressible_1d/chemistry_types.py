@@ -33,9 +33,13 @@ class SpeciesTable:
     h_s0: Float[jt.Array, " n_species"]  # [J/kg]
 
     # Optional properties [n_species] - use NaN for None
-    dissociation_energy: Float[jt.Array, " n_species"]  # [J]
+    dissociation_energy: Float[jt.Array, " n_species"]  # [J/kg]
     ionization_energy: Float[jt.Array, " n_species"]  # [J]
     vibrational_relaxation_factor: Float[jt.Array, " n_species"]  # [-]
+    vibrational_relaxation_a_ms: Float[jt.Array, " n_molecules n_species"]  # [-]
+    vibrational_relaxation_b_ms: Float[jt.Array, " n_molecules n_species"]  # [-]
+    vibrational_relaxation_molecule_indices: Int[jt.Array, " n_molecules"]
+    vibrational_relaxation_partner_indices: Int[jt.Array, " n_species"]
     theta_vib: Float[jt.Array, " n_species"]  # [K]
 
     # Charge state [n_species]
@@ -79,6 +83,22 @@ class SpeciesTable:
         assert (
             self.vibrational_relaxation_factor.shape == (n_sp,)
         ), f"vibrational_relaxation_factor shape {self.vibrational_relaxation_factor.shape} != ({n_sp},)"
+        n_mol = self.vibrational_relaxation_molecule_indices.shape[0]
+        n_partners = self.vibrational_relaxation_partner_indices.shape[0]
+        assert self.vibrational_relaxation_a_ms.shape == (
+            n_mol,
+            n_partners,
+        ), (
+            "vibrational_relaxation_a_ms shape "
+            f"{self.vibrational_relaxation_a_ms.shape} != ({n_mol}, {n_partners})"
+        )
+        assert self.vibrational_relaxation_b_ms.shape == (
+            n_mol,
+            n_partners,
+        ), (
+            "vibrational_relaxation_b_ms shape "
+            f"{self.vibrational_relaxation_b_ms.shape} != ({n_mol}, {n_partners})"
+        )
         assert self.theta_vib.shape == (
             n_sp,
         ), f"theta_vib shape {self.theta_vib.shape} != ({n_sp},)"
