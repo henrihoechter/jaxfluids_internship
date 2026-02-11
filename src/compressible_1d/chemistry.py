@@ -489,7 +489,9 @@ def compute_all_chemical_sources(
     n_s = rho_s / (M_s[None, :] + _TINY)  # [mol/m^3]
     n_mix = jnp.sum(n_s, axis=1) * constants.N_A  # [1/m^3]
 
-    log_n_s = jnp.log(jnp.clip(n_s, _TINY, None))
+    # Use dtype-aware floor to avoid log(0) underflow for float32.
+    n_s_floor = jnp.finfo(n_s.dtype).tiny
+    log_n_s = jnp.log(jnp.clip(n_s, n_s_floor, None))
     log_prod_f = reaction_rate_products(log_n_s, reaction_table.reactant_stoich)
     log_prod_b = reaction_rate_products(log_n_s, reaction_table.product_stoich)
 

@@ -382,7 +382,9 @@ def load_reactions_from_json(
         - n_f: Temperature exponent [-]
         - E_f_over_k: Activation energy / k [K]
         - equilibrium_coeffs_casseau: Casseau coefficients table with rows
-            [n_ref_cm3 or n_ref_m3, A0..A4] for Eq. 2.69
+            [n_ref_cm3 or n_ref_m3, A0..A4] for Eq. 2.69. Preferred as a
+            per-reaction field. A top-level equilibrium_coeffs_casseau is
+            still accepted for backward compatibility.
 
     Notes:
         - C_f is converted from per-molecule to per-mol units on load.
@@ -429,8 +431,6 @@ def load_reactions_from_json(
     is_electron_impact = jnp.zeros(n_reactions)
 
     coeffs_data = data.get("equilibrium_coeffs_casseau")
-    if coeffs_data is None:
-        raise ValueError("Missing equilibrium_coeffs_casseau in reaction JSON.")
 
     def _parse_coeff_table(coeff_rows: list[dict]) -> jnp.ndarray:
         rows = []
@@ -455,36 +455,49 @@ def load_reactions_from_json(
         rows.sort(key=lambda r: r[0])
         return jnp.array(rows)
 
-    if isinstance(coeffs_data, list):
-        if coeffs_data and isinstance(coeffs_data[0], dict):
-            coeff_lists = [coeffs_data] * n_reactions
-        else:
-            if len(coeffs_data) != n_reactions:
-                raise ValueError(
-                    "equilibrium_coeffs_casseau list length must match reactions."
-                )
-            coeff_lists = coeffs_data
-    elif isinstance(coeffs_data, dict):
-        if len(coeffs_data) == 1:
-            coeff_lists = [next(iter(coeffs_data.values()))] * n_reactions
-        else:
-            coeff_lists = []
-            for rxn in valid_reactions:
-                key = rxn.get("equilibrium_key", rxn.get("equation", ""))
-                if key in coeffs_data:
-                    coeff_lists.append(coeffs_data[key])
-                    continue
-                key_norm = key.replace(" ", "")
-                match = None
-                for k, v in coeffs_data.items():
-                    if k.replace(" ", "") == key_norm:
-                        match = v
-                        break
-                if match is None:
-                    raise ValueError(f"No Casseau coeffs for reaction '{key}'.")
-                coeff_lists.append(match)
+    # Preferred format: coefficients embedded per reaction.
+    per_reaction_coeffs = [
+        rxn.get("equilibrium_coeffs_casseau") for rxn in valid_reactions
+    ]
+    if any(rows is not None for rows in per_reaction_coeffs):
+        if not all(rows is not None for rows in per_reaction_coeffs):
+            raise ValueError(
+                "All reactions must define equilibrium_coeffs_casseau if any do."
+            )
+        coeff_lists = per_reaction_coeffs
     else:
-        raise ValueError("equilibrium_coeffs_casseau must be a list or dict.")
+        if coeffs_data is None:
+            raise ValueError("Missing equilibrium_coeffs_casseau in reaction JSON.")
+        if isinstance(coeffs_data, list):
+            if coeffs_data and isinstance(coeffs_data[0], dict):
+                coeff_lists = [coeffs_data] * n_reactions
+            else:
+                if len(coeffs_data) != n_reactions:
+                    raise ValueError(
+                        "equilibrium_coeffs_casseau list length must match reactions."
+                    )
+                coeff_lists = coeffs_data
+        elif isinstance(coeffs_data, dict):
+            if len(coeffs_data) == 1:
+                coeff_lists = [next(iter(coeffs_data.values()))] * n_reactions
+            else:
+                coeff_lists = []
+                for rxn in valid_reactions:
+                    key = rxn.get("equilibrium_key", rxn.get("equation", ""))
+                    if key in coeffs_data:
+                        coeff_lists.append(coeffs_data[key])
+                        continue
+                    key_norm = key.replace(" ", "")
+                    match = None
+                    for k, v in coeffs_data.items():
+                        if k.replace(" ", "") == key_norm:
+                            match = v
+                            break
+                    if match is None:
+                        raise ValueError(f"No Casseau coeffs for reaction '{key}'.")
+                    coeff_lists.append(match)
+        else:
+            raise ValueError("equilibrium_coeffs_casseau must be a list or dict.")
 
     parsed_tables = [_parse_coeff_table(rows) for rows in coeff_lists]
     n_refs = parsed_tables[0].shape[0] if parsed_tables else 0

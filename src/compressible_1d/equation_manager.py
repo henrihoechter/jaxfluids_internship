@@ -134,6 +134,7 @@ def run(
     equation_manager: equation_manager_types.EquationManager,
     t_final: float,
     save_interval: int = 100,
+    dt_array: Float[Array, "n_steps"] | None = None,
 ) -> tuple[
     Float[Array, "n_snapshots n_cells n_variables"], Float[Array, "n_snapshots"]
 ]:
@@ -144,6 +145,8 @@ def run(
         equation_manager: Contains all configuration
         t_final: Final simulation time
         save_interval: Save solution every N steps
+        dt_array: Optional per-step timestep array. If provided, its length defines
+            n_steps and t_final is ignored.
 
     Returns:
         U_history: Solution snapshots [n_snapshots, n_cells, n_variables]
@@ -157,7 +160,12 @@ def run(
     # Time loop
     U = U_init
     t = 0.0
-    n_steps = int(t_final / dt)
+    if dt_array is None:
+        n_steps = int(t_final / dt)
+        dt_sequence = jnp.full((n_steps,), dt, dtype=jnp.result_type(dt, 0.0))
+    else:
+        n_steps = int(dt_array.shape[0])
+        dt_sequence = dt_array
     n_snapshots = int(n_steps // save_interval) + 1
 
     n_cells, n_variables = U_init.shape
@@ -171,8 +179,10 @@ def run(
 
     snapshot_idx = 1
     for step in range(1, n_steps + 1):
-        U = advance_one_step_jitted(U, equation_manager)
-        t += dt
+        dt_step = dt_sequence[step - 1]
+        # U = advance_one_step_jitted(U, equation_manager)
+        U = advance_one_step(U, equation_manager, dt_step)
+        t += float(dt_step)
 
         if step % save_interval == 0 and snapshot_idx < n_snapshots:
             U_history = U_history.at[snapshot_idx, :, :].set(U)
