@@ -28,9 +28,12 @@
       },
       "is_dissociation": true,
       "is_electron_impact": false,
-      "C_f": 1.1623e-08,
-      "n_f": -1.6,
-      "E_f_over_k": 113200.0,
+      "other_C_f": 1.1623e-08,
+      "other_n_f": -1.6,
+      "other_E_f_over_k": 113200.0,
+      "C_f": 4.10153e-12,
+      "n_f": -0.62,
+      "E_f_over_k": 113500.0,
       "equilibrium_coeffs_casseau": [
         {
           "n_ref_cm3": 1e14,

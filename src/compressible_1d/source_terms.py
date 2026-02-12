@@ -162,6 +162,8 @@ def compute_vibrational_relaxation(
     # tau_v = compute_relaxation_time(Y_s, rho, T, T_v, p, equation_manager)
     tau_v = compute_relaxation_time_2_casseau(Y_s, rho, T, p, equation_manager)
 
+    # tau_v = 9e-9 * jnp.ones_like(tau_v) 
+
     # Compute per-species energy difference
     # delta_e_v_s has shape [n_species, n_cells]
     delta_e_v_s = e_v_eq_species - e_v_actual_species  # [n_species, n_cells]

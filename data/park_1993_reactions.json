@@ -82,7 +82,7 @@
       "products": {"N": 3},
       "is_dissociation": true,
       "is_electron_impact": false,
-      "C_f": 1.600e+22,
+      "C_f": 3.000e+22,
       "n_f": -1.60,
       "E_f_over_k": 1.132e+05,
       "equilibrium_coeffs": [1.858, -1.325, -9.856, -0.174, 0.008]
@@ -108,7 +108,7 @@
       "products": {"N": 2, "N2": 1},
       "is_dissociation": true,
       "is_electron_impact": false,
-      "C_f": 3.700e+21,
+      "C_f": 7.000e+21,
       "n_f": -1.60,
       "E_f_over_k": 1.132e+05,
       "equilibrium_coeffs": [1.858, -1.325, -9.856, -0.174, 0.008]

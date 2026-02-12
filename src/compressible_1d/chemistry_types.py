@@ -237,6 +237,7 @@ class ChemistryModelConfig:
         "preferential_constant"
     )
     qp_constant: float = 0.3
+    park_alpha: float = 0.7
 
 
 @jax.tree_util.register_dataclass

@@ -135,7 +135,7 @@ def _cvdv_level_counts(
     theta_safe = jnp.clip(theta_vib, 1e-12, None)
     D_safe = jnp.where(jnp.isfinite(dissociation_energy), dissociation_energy, 0.0)
     m_particle = molar_masses / constants.N_A  # [kg]
-    N_m = jnp.floor(D_safe * m_particle / (constants.k * theta_safe))
+    N_m = jnp.floor(0.7 * D_safe * m_particle / (constants.k * theta_safe))
     return jnp.clip(N_m, 0.0, CVDV_MAX_LEVELS - 1.0)
 
 
@@ -401,7 +401,7 @@ def build_park_chemistry_model(
     if config is None:
         config = ChemistryModelConfig()
 
-    park_alpha = 0.7
+    park_alpha = config.park_alpha
 
     def forward_rate_coefficient(
         T: Float[Array, " n_cells"],
@@ -446,7 +446,7 @@ def build_park_chemistry_model(
             D_m = jnp.where(jnp.isfinite(D_m), D_m, 0.0)
             e_el = thermodynamic_relations.compute_e_el(T_v, species_table)  # [J/kg]
             D0 = config.qp_constant * D_m[:, None]
-            source = omega_dot_dissoc * (D0 + e_el).T
+            source = omega_dot_dissoc * (D0 + 0.5 * e_el).T
         else:
             raise ValueError(
                 f"Unknown park_vibrational_source '{config.park_vibrational_source}'."
@@ -506,7 +506,7 @@ def compute_all_chemical_sources(
     # Casseau coefficients are typically fitted in kmol-based concentrations.
     # Convert K_eq to mol-based concentrations using (10^3)^{Δν}.
     delta_nu = jnp.sum(reaction_table.net_stoich, axis=1)
-    K_eq = K_eq * jnp.power(1.0e3, delta_nu)[:, None]
+    K_eq = K_eq * jnp.power(1.0e6, delta_nu)[:, None]
     k_b = k_f / (K_eq + _TINY)
 
     R_f = k_f * jnp.exp(log_prod_f)  # [mol/m^3/s]

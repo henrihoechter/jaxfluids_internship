@@ -181,7 +181,7 @@ def run(
     for step in range(1, n_steps + 1):
         dt_step = dt_sequence[step - 1]
         # U = advance_one_step_jitted(U, equation_manager)
-        U = advance_one_step(U, equation_manager, dt_step)
+        U = advance_one_step(U, equation_manager, dt_step)  # debug
         t += float(dt_step)
 
         if step % save_interval == 0 and snapshot_idx < n_snapshots:
