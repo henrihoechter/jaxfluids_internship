@@ -34,6 +34,10 @@ class ClippingConfig:
     rho_Ev_min: float = 0.0  # Vibrational energy per volume
     rho_Ev_max: float = 1e12
 
+    # Transport properties
+    D_s_min: float = 0.0  # Species diffusion coefficient [m^2/s]
+    D_s_max: float = 1e2  # Physical cap for diffusion [m^2/s]
+
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True, slots=True)

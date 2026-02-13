@@ -631,14 +631,26 @@ def compute_equilibrium_enthalpy(
     Returns:
         Specific enthalpy [J/kg] for all species, shape (n_species, N)
     """
-    # return compute_equilibrium_enthalpy_polynomial(
-    #     T,
-    #     species_table.T_limit_low,
-    #     species_table.T_limit_high,
-    #     species_table.enthalpy_coeffs,
-    #     species_table.molar_masses,
-    # )
-    raise NotImplementedError
+    T = jnp.atleast_1d(T)
+    M = species_table.molar_masses
+    R_over_M = constants.R_universal / M
+
+    cv_tr = compute_cv_trans_rot(T, species_table.is_monoatomic, M)
+    e_tr = cv_tr * T[None, :]
+    e_ve = compute_e_ve(T, species_table)
+
+    h = e_tr + e_ve + R_over_M[:, None] * T[None, :]
+
+    T_ref = species_table.T_ref
+    cv_tr_ref = compute_cv_trans_rot(
+        jnp.array([T_ref]), species_table.is_monoatomic, M
+    )
+    e_tr_ref = cv_tr_ref[:, 0] * T_ref
+    e_ve_ref = compute_e_ve(jnp.array([T_ref]), species_table)[:, 0]
+    h_ref_current = e_tr_ref + e_ve_ref + R_over_M * T_ref
+    offset = species_table.h_s0 - h_ref_current
+
+    return h + offset[:, None]
 
 
 def compute_cp(

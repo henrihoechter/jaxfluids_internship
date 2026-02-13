@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from compressible_1d import transport
+from compressible_1d import transport_models
 from compressible_1d import thermodynamic_relations
 from compressible_1d import equation_manager_utils
 
@@ -193,15 +193,14 @@ def compute_viscous_flux(
         F_v: Viscous flux at interfaces [n_interfaces, n_variables]
     """
     species_table = equation_manager.species
-    collision_integrals = equation_manager.collision_integrals
     dx = equation_manager.numerics_config.dx
     n_species = species_table.n_species
     n_cells_with_halo = U.shape[0]
     n_interfaces = n_cells_with_halo - 1
     n_variables = U.shape[1]
 
-    # If no collision integrals provided, return zero flux (inviscid case)
-    if collision_integrals is None:
+    # If transport is disabled, return zero flux (inviscid case)
+    if equation_manager.transport_model is None:
         return jnp.zeros((n_interfaces, n_variables))
 
     # Extract primitives from conserved variables
@@ -216,63 +215,9 @@ def compute_viscous_flux(
     # Extract velocity
     u = U[:, n_species] / rho
 
-    # Build pair index matrix for collision integral lookup
-    pair_indices = transport.build_pair_index_matrix(
-        species_table.names, collision_integrals
+    mu, eta_t, eta_r, eta_v, D_s = transport_models.compute_transport_properties(
+        T, T_v, p, Y_s, rho, equation_manager
     )
-
-    # Interpolate collision integrals at cell centers
-    pi_omega_11 = transport.interpolate_collision_integral(
-        T,
-        collision_integrals.omega_11_2000K,
-        collision_integrals.omega_11_4000K,
-    )
-    pi_omega_22 = transport.interpolate_collision_integral(
-        T,
-        collision_integrals.omega_22_2000K,
-        collision_integrals.omega_22_4000K,
-    )
-
-    # Also need collision integrals at T_v for vibrational conductivity
-    pi_omega_11_Tv = transport.interpolate_collision_integral(
-        T_v,
-        collision_integrals.omega_11_2000K,
-        collision_integrals.omega_11_4000K,
-    )
-
-    # Compute modified collision integrals
-    M_s = species_table.molar_masses
-    delta_1 = transport.compute_modified_collision_integral_1(
-        T, M_s, M_s, pi_omega_11, pair_indices
-    )
-    delta_2 = transport.compute_modified_collision_integral_2(
-        T, M_s, M_s, pi_omega_22, pair_indices
-    )
-    delta_1_Tv = transport.compute_modified_collision_integral_1(
-        T_v, M_s, M_s, pi_omega_11_Tv, pair_indices
-    )
-
-    # Compute molar concentrations gamma_s = rho_s / (rho*M_s) = c_s / M_s
-    gamma_s = c_s / M_s  # [mol/kg] * [kg/m^3] = [mol/m^3] when multiplied by rho
-
-    # Compute transport properties at cell centers
-    mu = transport.compute_mixture_viscosity(T, gamma_s, M_s, delta_2)
-    eta_t = transport.compute_translational_thermal_conductivity(
-        T, gamma_s, M_s, delta_2
-    )
-
-    # is_molecule is the inverse of is_monoatomic
-    is_molecule = ~species_table.is_monoatomic.astype(bool)
-    eta_r = transport.compute_rotational_thermal_conductivity(
-        T, gamma_s, is_molecule, delta_1
-    )
-    eta_v = transport.compute_vibrational_thermal_conductivity(
-        T_v, gamma_s, is_molecule, delta_1_Tv
-    )
-
-    # Compute binary and effective diffusion coefficients
-    D_sr = transport.compute_binary_diffusion_coefficient(T, p, delta_1)
-    D_s = transport.compute_effective_diffusion_coefficient(gamma_s, M_s, D_sr)
 
     # Compute gradients at interfaces
     du_dx = compute_gradients_at_interfaces(u, dx)
@@ -280,6 +225,10 @@ def compute_viscous_flux(
     dTv_dx = compute_gradients_at_interfaces(T_v, dx)
     # dc_s_dx = compute_gradients_at_interfaces_multispecies(c_s, dx)
     dc_s_dx = compute_gradients_at_interfaces_multispecies(c_s, dx)
+
+    # Apply physical cap to diffusion coefficients
+    clip_cfg = equation_manager.numerics_config.clipping
+    D_s = jnp.clip(D_s, clip_cfg.D_s_min, clip_cfg.D_s_max)
 
     # Interpolate transport properties to interfaces
     mu_face = compute_interface_values(mu)
@@ -292,6 +241,10 @@ def compute_viscous_flux(
     T_face = compute_interface_values(T)
     T_v_face = compute_interface_values(T_v)
     # c_s_face = compute_interface_values_multispecies(c_s)
+
+    # Limit diffusion by diffusive CFL at interfaces
+    D_cap = dx**2 / (2.0 * equation_manager.numerics_config.dt)
+    D_s_face = jnp.clip(D_s_face, 0.0, D_cap)
 
     # Compute species diffusion flux at interfaces
     # j_s = compute_species_diffusion_flux(rho_face, D_s_face, dc_s_dx)

@@ -70,6 +70,7 @@ def _interp_casseau_coeffs(
     """Interpolate Casseau coefficients in log-log space for one reaction."""
     n_ref = jnp.clip(coeffs[:, 0], _TINY, None)
     log_n_ref = jnp.log(n_ref)
+    log_n_mix = jnp.clip(log_n_mix, log_n_ref[0], log_n_ref[-1])
     A = coeffs[:, 1:]  # [n_refs, 5]
 
     idx = jnp.searchsorted(log_n_ref, log_n_mix, side="right") - 1
@@ -100,7 +101,8 @@ def equilibrium_constant_casseau(
     Returns:
         K_eq: Equilibrium constant (dimensionless). Shape [n_reactions, n_cells].
     """
-    log_n_mix = jnp.log(jnp.clip(n_mix, _TINY, None))
+    n_mix_floor = jnp.finfo(n_mix.dtype).tiny
+    log_n_mix = jnp.log(jnp.clip(n_mix, n_mix_floor, None))
     A_interp = jax.vmap(_interp_casseau_coeffs, in_axes=(0, None))(coeffs, log_n_mix)
     # Map A0..A4 -> A1..A5 in Eq. 2.69
     A1 = A_interp[..., 0]
@@ -507,7 +509,11 @@ def compute_all_chemical_sources(
     # Convert K_eq to mol-based concentrations using (10^3)^{Δν}.
     delta_nu = jnp.sum(reaction_table.net_stoich, axis=1)
     K_eq = K_eq * jnp.power(1.0e6, delta_nu)[:, None]
-    k_b = k_f / (K_eq + _TINY)
+    # Guard against NaN/Inf and divide-by-zero in K_eq.
+    K_eq = jnp.where(jnp.isfinite(K_eq), K_eq, jnp.inf)
+    K_eq_floor = jnp.finfo(K_eq.dtype).tiny
+    K_eq = jnp.clip(K_eq, K_eq_floor, jnp.finfo(K_eq.dtype).max)
+    k_b = k_f / K_eq
 
     R_f = k_f * jnp.exp(log_prod_f)  # [mol/m^3/s]
     R_b = k_b * jnp.exp(log_prod_b)  # [mol/m^3/s]

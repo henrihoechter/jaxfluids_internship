@@ -13,7 +13,7 @@ from compressible_1d import solver
 from compressible_1d import source_terms
 from compressible_1d import equation_manager_types
 from compressible_1d import viscous_flux as viscous_flux_module
-from compressible_1d import transport
+from compressible_1d import transport_models
 from compressible_1d import equation_manager_utils
 from compressible_1d import thermodynamic_relations
 from compressible_1d import constants, equation_manager_utils
@@ -41,11 +41,10 @@ def check_diffusive_cfl(
     Returns:
         dt_diff: Maximum stable diffusive timestep [s], or None if inviscid
     """
-    if equation_manager.collision_integrals is None:
+    if equation_manager.transport_model is None:
         return None
 
     species_table = equation_manager.species
-    collision_integrals = equation_manager.collision_integrals
     dx = equation_manager.numerics_config.dx
     dt = equation_manager.numerics_config.dt
     n_species = species_table.n_species
@@ -55,56 +54,14 @@ def check_diffusive_cfl(
         U, equation_manager
     )
 
-    # Compute mass fractions
-    rho_s = U[:, :n_species]
-    c_s = rho_s / rho[:, None]
-
-    # Build pair index matrix
-    pair_indices = transport.build_pair_index_matrix(
-        species_table.names, collision_integrals
+    mu, eta_t, eta_r, _, D_s = transport_models.compute_transport_properties(
+        T, T_v, p, Y_s, rho, equation_manager
     )
 
-    # Interpolate collision integrals
-    pi_omega_11 = transport.interpolate_collision_integral(
-        T,
-        collision_integrals.omega_11_2000K,
-        collision_integrals.omega_11_4000K,
-    )
-    pi_omega_22 = transport.interpolate_collision_integral(
-        T,
-        collision_integrals.omega_22_2000K,
-        collision_integrals.omega_22_4000K,
-    )
-
-    # Compute modified collision integrals
-    M_s = species_table.molar_masses
-    delta_1 = transport.compute_modified_collision_integral_1(
-        T, M_s, M_s, pi_omega_11, pair_indices
-    )
-    delta_2 = transport.compute_modified_collision_integral_2(
-        T, M_s, M_s, pi_omega_22, pair_indices
-    )
-
-    # Compute molar concentrations
-    gamma_s = c_s / M_s
-
-    # Compute transport properties
-    mu = transport.compute_mixture_viscosity(T, gamma_s, M_s, delta_2)
-    eta_t = transport.compute_translational_thermal_conductivity(
-        T, gamma_s, M_s, delta_2
-    )
-
-    is_molecule = ~species_table.is_monoatomic.astype(bool)
-    eta_r = transport.compute_rotational_thermal_conductivity(
-        T, gamma_s, is_molecule, delta_1
-    )
-
-    # Total thermal conductivity
     eta = eta_t + eta_r
 
-    # Compute diffusion coefficients
-    D_sr = transport.compute_binary_diffusion_coefficient(T, p, delta_1)
-    D_s = transport.compute_effective_diffusion_coefficient(gamma_s, M_s, D_sr)
+    rho_s = U[:, :n_species]
+    c_s = rho_s / rho[:, None]
 
     # Compute cv for thermal diffusivity
     cv_tr = thermodynamic_relations.compute_cv_tr(
@@ -454,7 +411,7 @@ def compute_dU_dt_diffusive(
     dx = equation_manager.numerics_config.dx
 
     # Check if viscous terms are enabled
-    if equation_manager.collision_integrals is None:
+    if equation_manager.transport_model is None:
         return jnp.zeros((n_cells, n_vars))
 
     # Compute viscous flux at all interfaces (including ghost cells)
