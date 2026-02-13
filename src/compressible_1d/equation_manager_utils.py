@@ -2,8 +2,8 @@ from jaxtyping import Array, Float
 import jax.numpy as jnp
 
 from compressible_1d import equation_manager_types
-from compressible_1d import constants
-from compressible_1d import thermodynamic_relations
+from compressible_core import constants
+from compressible_core import thermodynamic_relations
 
 
 def compute_is_monoatomic(

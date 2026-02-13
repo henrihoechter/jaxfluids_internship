@@ -9,8 +9,8 @@ import jax.numpy as jnp
 import pytest
 from pathlib import Path
 
-from compressible_1d import transport
-from compressible_1d.chemistry_types import CollisionIntegralTable
+from compressible_core import transport
+from compressible_core.chemistry_types import CollisionIntegralTable
 
 # Configure JAX for testing
 jax.config.update("jax_enable_x64", True)

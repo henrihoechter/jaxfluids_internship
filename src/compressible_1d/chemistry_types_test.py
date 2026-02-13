@@ -4,9 +4,9 @@ import jax
 import jax.numpy as jnp
 from pathlib import Path
 
-from compressible_1d.chemistry_utils import load_species_table
-from compressible_1d import constants
-from compressible_1d import thermodynamic_relations
+from compressible_core.chemistry_utils import load_species_table
+from compressible_core import constants
+from compressible_core import thermodynamic_relations
 
 # Configure JAX for testing
 jax.config.update("jax_enable_x64", True)

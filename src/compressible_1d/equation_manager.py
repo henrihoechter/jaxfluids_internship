@@ -13,11 +13,11 @@ from compressible_1d import solver
 from compressible_1d import source_terms
 from compressible_1d import equation_manager_types
 from compressible_1d import viscous_flux as viscous_flux_module
-from compressible_1d import transport_models
 from compressible_1d import equation_manager_utils
-from compressible_1d import thermodynamic_relations
-from compressible_1d import constants, equation_manager_utils
-from compressible_1d.diagnose import runtime_check_array_sizes
+from compressible_core import transport_models
+from compressible_core import thermodynamic_relations
+from compressible_core import constants
+from compressible_core.diagnose import runtime_check_array_sizes
 
 
 def check_diffusive_cfl(

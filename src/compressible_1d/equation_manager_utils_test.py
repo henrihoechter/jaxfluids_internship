@@ -7,8 +7,8 @@ from pathlib import Path
 from compressible_1d import equation_manager_utils
 from compressible_1d import equation_manager_types
 from compressible_1d import numerics_types
-from compressible_1d.chemistry_utils import load_species_table
-from compressible_1d import constants
+from compressible_core.chemistry_utils import load_species_table
+from compressible_core import constants
 
 # Configure JAX for testing
 jax.config.update("jax_enable_x64", True)

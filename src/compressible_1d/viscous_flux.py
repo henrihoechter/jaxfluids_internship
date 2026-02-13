@@ -22,9 +22,9 @@ from typing import TYPE_CHECKING
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from compressible_1d import transport_models
-from compressible_1d import thermodynamic_relations
 from compressible_1d import equation_manager_utils
+from compressible_core import transport_models
+from compressible_core import thermodynamic_relations
 
 if TYPE_CHECKING:
     from compressible_1d.equation_manager_types import EquationManager

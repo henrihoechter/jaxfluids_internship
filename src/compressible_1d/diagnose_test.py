@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 import pytest
 
-from src.compressible_1d import diagnose
+from compressible_core import diagnose
 
 
 def test_check_nonnegativity_success():

@@ -9,8 +9,8 @@ from jaxtyping import Float, Array
 from compressible_1d import (
     equation_manager_types,
     equation_manager_utils,
-    thermodynamic_relations,
 )
+from compressible_core import thermodynamic_relations
 
 
 def compute_flux(

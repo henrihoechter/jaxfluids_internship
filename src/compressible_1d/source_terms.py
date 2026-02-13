@@ -6,11 +6,11 @@ Implements vibrational relaxation source terms.
 import jax.numpy as jnp
 from jaxtyping import Float, Array
 
-from compressible_1d import constants
 from compressible_1d import equation_manager_types
 from compressible_1d import equation_manager_utils
-from compressible_1d import thermodynamic_relations
-from compressible_1d import chemistry
+from compressible_core import chemistry
+from compressible_core import constants
+from compressible_core import thermodynamic_relations
 
 
 def compute_source_terms(

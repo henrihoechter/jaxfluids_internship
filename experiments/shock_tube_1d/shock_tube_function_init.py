@@ -19,16 +19,8 @@ from typing import Callable, Sequence
 import jax
 import jax.numpy as jnp
 
-from compressible_1d import (
-    chemistry_utils,
-    constants,
-    energy_models,
-    equation_manager,
-    equation_manager_types,
-    equation_manager_utils,
-    numerics_types,
-    solver,
-)
+from compressible_core import chemistry_utils, constants, energy_models
+from compressible_1d import equation_manager, equation_manager_types, equation_manager_utils, numerics_types, solver
 
 try:
     import plotly.graph_objects as go
