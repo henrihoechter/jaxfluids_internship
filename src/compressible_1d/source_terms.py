@@ -3,6 +3,7 @@
 Implements vibrational relaxation source terms.
 """
 
+import jax
 import jax.numpy as jnp
 from jaxtyping import Float, Array
 
@@ -13,9 +14,14 @@ from compressible_core import constants
 from compressible_core import thermodynamic_relations
 
 
+import functools
+
+
+@functools.partial(jax.named_call, name="source term")
 def compute_source_terms(
     U: Float[Array, "n_cells n_variables"],
     equation_manager: equation_manager_types.EquationManager,
+    primitives: equation_manager_utils.Primitives1D | None = None,
 ) -> Float[Array, "n_cells n_variables"]:
     """Compute all source terms: chemistry + vibrational relaxation.
 
@@ -45,8 +51,13 @@ def compute_source_terms(
     # Initialize source terms to zero
     S = jnp.zeros((n_cells, n_variables))
 
+    if primitives is None:
+        primitives = equation_manager_utils.extract_primitives(U, equation_manager)
+
     # === Chemical Source Terms ===
-    omega_dot, Q_vib_chem = compute_chemical_source(U, equation_manager)
+    omega_dot, Q_vib_chem = compute_chemical_source(
+        U, equation_manager, primitives=primitives
+    )
 
     # Species production rates
     S = S.at[:, :n_species].set(omega_dot)
@@ -57,8 +68,8 @@ def compute_source_terms(
     # === Vibrational-Electronic Energy Sources (Eq. 16 from NASA TP-2867) ===
 
     # Term 6: Vibrational-translational relaxation
-    Q_TV = compute_vibrational_relaxation(U, equation_manager)
-    # Q_TV = jnp.zeros_like(Q_TV) 
+    Q_TV = compute_vibrational_relaxation(U, equation_manager, primitives=primitives)
+    # Q_TV = jnp.zeros_like(Q_TV)
 
     Q_VV = jnp.zeros_like(Q_TV)  # TODO: implement vibrational-vibrational relaxation
     Q_eT = jnp.zeros_like(Q_TV)  # TODO: implement electron-translational relaxation
@@ -76,9 +87,11 @@ def compute_source_terms(
     return S
 
 
+@jax.named_call
 def compute_chemical_source(
     U: Float[Array, "n_cells n_variables"],
     equation_manager: equation_manager_types.EquationManager,
+    primitives: equation_manager_utils.Primitives1D | None = None,
 ) -> tuple[
     Float[Array, "n_cells n_species"],
     Float[Array, " n_cells"],
@@ -105,9 +118,9 @@ def compute_chemical_source(
         return omega_dot, Q_vib_chem
 
     # Extract primitives (only need T and T_v for rate calculations)
-    _, _, T, T_v, _ = equation_manager_utils.extract_primitives_from_U(
-        U, equation_manager
-    )
+    if primitives is None:
+        primitives = equation_manager_utils.extract_primitives(U, equation_manager)
+    _, _, T, T_v, _ = primitives
 
     rho_s = U[:, :n_species]
 
@@ -125,6 +138,7 @@ def compute_chemical_source(
 def compute_vibrational_relaxation(
     U: Float[Array, "n_cells n_variables"],
     equation_manager: equation_manager_types.EquationManager,
+    primitives: equation_manager_utils.Primitives1D | None = None,
 ) -> Float[Array, "n_cells"]:
     """Compute vibrational relaxation source term Q_dot_v.
 
@@ -143,9 +157,9 @@ def compute_vibrational_relaxation(
     Returns:
         Q_dot_v: Relaxation source term [n_cells] in W/m³
     """
-    Y_s, rho, T, T_v, p = equation_manager_utils.extract_primitives_from_U(
-        U, equation_manager
-    )
+    if primitives is None:
+        primitives = equation_manager_utils.extract_primitives(U, equation_manager)
+    Y_s, rho, T, T_v, p = primitives
 
     # Compute equilibrium vibrational energy at T per species
     # Shape: [n_species, n_cells]
@@ -162,7 +176,7 @@ def compute_vibrational_relaxation(
     # tau_v = compute_relaxation_time(Y_s, rho, T, T_v, p, equation_manager)
     tau_v = compute_relaxation_time_2_casseau(Y_s, rho, T, p, equation_manager)
 
-    # tau_v = 9e-9 * jnp.ones_like(tau_v) 
+    # tau_v = 9e-9 * jnp.ones_like(tau_v)
 
     # Compute per-species energy difference
     # delta_e_v_s has shape [n_species, n_cells]

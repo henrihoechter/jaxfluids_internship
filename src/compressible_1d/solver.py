@@ -17,6 +17,8 @@ def compute_flux(
     U_L: Float[Array, "n_interfaces n_variables"],
     U_R: Float[Array, "n_interfaces n_variables"],
     equation_manager: equation_manager_types.EquationManager,
+    primitives_L: equation_manager_utils.Primitives1D | None = None,
+    primitives_R: equation_manager_utils.Primitives1D | None = None,
 ) -> Float[Array, "n_interfaces n_variables"]:
     """Compute numerical flux at cell interfaces using HLLC Riemann solver.
 
@@ -32,13 +34,14 @@ def compute_flux(
         - HLLC Riemann solver for multi-species two-temperature Euler
         - State vector: [rho_1, ..., rho_ns, rho*u, rho*E, rho*E_v]
     """
-    # Extract primitives from left and right states
-    Y_L, rho_L, T_L, Tv_L, p_L = equation_manager_utils.extract_primitives_from_U(
-        U_L, equation_manager
-    )
-    Y_R, rho_R, T_R, Tv_R, p_R = equation_manager_utils.extract_primitives_from_U(
-        U_R, equation_manager
-    )
+    # Extract primitives from left and right states (allow precomputed)
+    if primitives_L is None:
+        primitives_L = equation_manager_utils.extract_primitives(U_L, equation_manager)
+    if primitives_R is None:
+        primitives_R = equation_manager_utils.extract_primitives(U_R, equation_manager)
+
+    Y_L, rho_L, T_L, Tv_L, p_L = primitives_L
+    Y_R, rho_R, T_R, Tv_R, p_R = primitives_R
 
     # Extract velocity
     n_species = equation_manager.species.n_species

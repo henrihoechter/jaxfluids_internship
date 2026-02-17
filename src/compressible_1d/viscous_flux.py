@@ -171,6 +171,7 @@ def compute_heat_flux(
 def compute_viscous_flux(
     U: Float[Array, "n_cells_with_halo n_variables"],
     equation_manager: "EquationManager",
+    primitives: equation_manager_utils.Primitives1D | None = None,
 ) -> Float[Array, "n_interfaces n_variables"]:
     """Compute viscous flux at cell interfaces.
 
@@ -203,10 +204,10 @@ def compute_viscous_flux(
     if equation_manager.transport_model is None:
         return jnp.zeros((n_interfaces, n_variables))
 
-    # Extract primitives from conserved variables
-    Y_s, rho, T, T_v, p = equation_manager_utils.extract_primitives_from_U(
-        U, equation_manager
-    )
+    # Extract primitives from conserved variables (allow precomputed)
+    if primitives is None:
+        primitives = equation_manager_utils.extract_primitives(U, equation_manager)
+    Y_s, rho, T, T_v, p = primitives
 
     # Compute mass fractions
     rho_s = U[:, :n_species]

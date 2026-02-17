@@ -1,4 +1,7 @@
+from typing import NamedTuple
+
 from jaxtyping import Array, Float
+import jax
 import jax.numpy as jnp
 
 from compressible_1d import equation_manager_types
@@ -23,6 +26,22 @@ def compute_is_monoatomic(
     return ~jnp.isfinite(dissociation_energy)
 
 
+class Primitives1D(NamedTuple):
+    Y_s: Array
+    rho: Array
+    T: Array
+    Tv: Array
+    p: Array
+
+
+def extract_primitives(
+    U: Float[Array, "n_cells n_variables"],
+    equation_manager: equation_manager_types.EquationManager,
+) -> Primitives1D:
+    return Primitives1D(*extract_primitives_from_U(U, equation_manager))
+
+
+@jax.named_call
 def extract_primitives_from_U(
     U: Float[Array, "n_cells n_variables"],
     equation_manager: equation_manager_types.EquationManager,

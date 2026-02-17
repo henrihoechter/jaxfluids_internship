@@ -16,8 +16,9 @@ from compressible_1d import viscous_flux as viscous_flux_module
 from compressible_1d import equation_manager_utils
 from compressible_core import transport_models
 from compressible_core import thermodynamic_relations
-from compressible_core import constants
 from compressible_core.diagnose import runtime_check_array_sizes
+
+import functools
 
 
 def check_diffusive_cfl(
@@ -225,6 +226,7 @@ def run_scan(
     return U_history, t_history
 
 
+@functools.partial(jax.named_call, name="advance")
 @runtime_check_array_sizes
 def advance_one_step(
     U: Float[Array, "n_cells n_variables"],
@@ -250,7 +252,8 @@ def advance_one_step(
         dt = equation_manager.numerics_config.dt
 
     # Step 1: Half-step source terms (vibrational relaxation)
-    S = source_terms.compute_source_terms(U, equation_manager)
+    primitives = equation_manager_utils.extract_primitives(U, equation_manager)
+    S = source_terms.compute_source_terms(U, equation_manager, primitives=primitives)
     U = U + 0.5 * dt * S
 
     # Step 2: Full-step convection
@@ -261,12 +264,14 @@ def advance_one_step(
     U = integrate_in_time(U, dU_dt, equation_manager, dt)
 
     # Step 3: Half-step source terms
-    S = source_terms.compute_source_terms(U, equation_manager)
+    primitives = equation_manager_utils.extract_primitives(U, equation_manager)
+    S = source_terms.compute_source_terms(U, equation_manager, primitives=primitives)
     U = U + 0.5 * dt * S
 
     return U
 
 
+@functools.partial(jax.named_call, name="bc")
 @runtime_check_array_sizes
 def apply_boundary_conditions(
     U: Float[Array, "n_cells n_variables"],
@@ -286,6 +291,7 @@ def apply_boundary_conditions(
     return bc_module.apply_boundary_conditions(U, bc_type, n_ghosts)
 
 
+@functools.partial(jax.named_call, name="dU_dt_conv")
 @runtime_check_array_sizes
 def compute_dU_dt_convective(
     U: Float[Array, "n_cells_with_halo n_variables"],
@@ -301,7 +307,15 @@ def compute_dU_dt_convective(
         dU_dt: Convective derivative [n_cells, n_variables]
     """
     U_L, U_R = compute_left_right_states(U, equation_manager)
-    F = compute_convective_flux(U_L, U_R, equation_manager)
+    primitives_L = equation_manager_utils.extract_primitives(U_L, equation_manager)
+    primitives_R = equation_manager_utils.extract_primitives(U_R, equation_manager)
+    F = compute_convective_flux(
+        U_L,
+        U_R,
+        equation_manager,
+        primitives_L=primitives_L,
+        primitives_R=primitives_R,
+    )
 
     n_halo = equation_manager.numerics_config.n_halo_cells
     n_cells = U.shape[0] - 2 * n_halo
@@ -362,6 +376,8 @@ def compute_convective_flux(
     U_L: Float[Array, "n_interfaces n_variables"],
     U_R: Float[Array, "n_interfaces n_variables"],
     equation_manager: equation_manager_types.EquationManager,
+    primitives_L: equation_manager_utils.Primitives1D | None = None,
+    primitives_R: equation_manager_utils.Primitives1D | None = None,
 ) -> Float[Array, "n_interfaces n_variables"]:
     """Compute numerical flux at cell interfaces.
 
@@ -376,13 +392,20 @@ def compute_convective_flux(
     if equation_manager.numerics_config.flux_scheme == "lax_friedrichs":
         raise NotImplementedError("Lax-Friedrichs flux not yet implemented")
     elif equation_manager.numerics_config.flux_scheme == "hllc":
-        return solver.compute_flux(U_L, U_R, equation_manager)
+        return solver.compute_flux(
+            U_L,
+            U_R,
+            equation_manager,
+            primitives_L=primitives_L,
+            primitives_R=primitives_R,
+        )
     else:
         raise ValueError(
             f"Unknown flux scheme: {equation_manager.numerics_config.flux_scheme}"
         )
 
 
+@functools.partial(jax.named_call, name="dU_dt_diff")
 @runtime_check_array_sizes
 def compute_dU_dt_diffusive(
     U: Float[Array, "n_cells_with_halo n_variables"],
@@ -414,8 +437,11 @@ def compute_dU_dt_diffusive(
     if equation_manager.transport_model is None:
         return jnp.zeros((n_cells, n_vars))
 
+    primitives = equation_manager_utils.extract_primitives(U, equation_manager)
     # Compute viscous flux at all interfaces (including ghost cells)
-    F_v = viscous_flux_module.compute_viscous_flux(U, equation_manager)
+    F_v = viscous_flux_module.compute_viscous_flux(
+        U, equation_manager, primitives=primitives
+    )
 
     # F_v has shape [n_cells_with_halo - 1, n_variables]
     # We need fluxes at interior cell interfaces
@@ -437,6 +463,7 @@ def compute_dU_dt_diffusive(
     return dU_dt
 
 
+@functools.partial(jax.named_call, name="int")
 @runtime_check_array_sizes
 def integrate_in_time(
     U: Float[Array, "n_cells n_variables"],
@@ -464,12 +491,14 @@ def integrate_in_time(
         # Midpoint method (RK2)
         U_half = U + 0.5 * dt * dU_dt
         U_half_with_halo = apply_boundary_conditions(U_half, equation_manager)
-        dU_dt_half_convective = compute_dU_dt_convective(
-            U_half_with_halo, equation_manager
-        )
-        dU_dt_half_diffusive = compute_dU_dt_diffusive(
-            U_half_with_halo, equation_manager
-        )
+        with jax.named_scope("int/conv"):
+            dU_dt_half_convective = compute_dU_dt_convective(
+                U_half_with_halo, equation_manager
+            )
+        with jax.named_scope("int/diff"):
+            dU_dt_half_diffusive = compute_dU_dt_diffusive(
+                U_half_with_halo, equation_manager
+            )
         dU_dt_half = dU_dt_half_convective + dU_dt_half_diffusive
 
         return U + dt * dU_dt_half
