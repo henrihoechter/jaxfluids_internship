@@ -689,6 +689,23 @@ def compute_cv_tr(
     )
 
 
+def compute_cp_tr(
+    T: Float[Array, " N"],
+    species_table: "SpeciesTable",
+) -> Float[Array, "n_species N"]:
+    """Compute translational-rotational C_p for all species.
+
+    Uses C_p,tr = C_v,tr + R/M (ideal gas).
+    """
+    cv_tr = compute_cv_trans_rot(
+        T,
+        species_table.is_monoatomic,
+        species_table.molar_masses,
+    )
+    R_over_M = constants.R_universal / species_table.molar_masses
+    return cv_tr + R_over_M[:, None]
+
+
 def compute_cv_ve(
     T_V: Float[Array, " N"],
     species_table: "SpeciesTable",

@@ -11,8 +11,13 @@ import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array, Float
 
+from compressible_core import chemistry_types
 from .mesh_gmsh import Mesh2D
-from .equation_manager_types import BoundaryConditionArrays2D, EquationManager2D
+from .equation_manager_types import (
+    BoundaryConditionArrays2D,
+    BoundaryConditionConfig2D,
+    EquationManager2D,
+)
 from . import boundary_conditions
 from . import equation_manager_utils
 from . import solver
@@ -41,10 +46,12 @@ def _face_weights(mesh: Mesh2D, axisymmetric: bool) -> tuple[jnp.ndarray, jnp.nd
 
 
 def _build_boundary_arrays(
-    mesh: Mesh2D, equation_manager: EquationManager2D
+    mesh: Mesh2D,
+    boundary_config: BoundaryConditionConfig2D,
+    species: chemistry_types.SpeciesTable,
 ) -> BoundaryConditionArrays2D:
     n_faces = mesh.face_left.shape[0]
-    n_species = equation_manager.species.n_species
+    n_species = species.n_species
 
     bc_id = np.full((n_faces,), -1, dtype=np.int32)
     inflow_rho = np.ones((n_faces,), dtype=float)
@@ -75,7 +82,7 @@ def _build_boundary_arrays(
     wall_dist = np.clip(wall_dist, 1e-12, None)
 
     tags = np.asarray(mesh.boundary_tags)
-    tag_to_bc = equation_manager.boundary_config.tag_to_bc
+    tag_to_bc = boundary_config.tag_to_bc
     for tag, bc in tag_to_bc.items():
         mask = tags == tag
         if not np.any(mask):
@@ -160,6 +167,38 @@ def _build_boundary_arrays(
         wall_sigma_t=jnp.asarray(wall_sigma_t),
         wall_sigma_v=jnp.asarray(wall_sigma_v),
         wall_dist=jnp.asarray(wall_dist),
+    )
+
+
+def build_boundary_arrays(
+    mesh: Mesh2D,
+    boundary_config: BoundaryConditionConfig2D,
+    species: chemistry_types.SpeciesTable,
+) -> BoundaryConditionArrays2D:
+    return _build_boundary_arrays(mesh, boundary_config, species)
+
+
+def build_equation_manager(
+    mesh: Mesh2D,
+    *,
+    species: chemistry_types.SpeciesTable,
+    collision_integrals: chemistry_types.CollisionIntegralTable | None,
+    reactions: chemistry_types.ReactionTable | None,
+    numerics_config,
+    boundary_config: BoundaryConditionConfig2D,
+    transport_model,
+    casseau_transport=None,
+) -> EquationManager2D:
+    boundary_arrays = _build_boundary_arrays(mesh, boundary_config, species)
+    return EquationManager2D(
+        species=species,
+        collision_integrals=collision_integrals,
+        reactions=reactions,
+        numerics_config=numerics_config,
+        boundary_config=boundary_config,
+        boundary_arrays=boundary_arrays,
+        transport_model=transport_model,
+        casseau_transport=casseau_transport,
     )
 
 
@@ -292,51 +331,30 @@ def compute_face_states(
     U_L = U[face_left]
     U_R = jnp.where(face_right[:, None] >= 0, U[face_right], U_L)
 
-    if equation_manager.boundary_arrays is not None:
-        bc = equation_manager.boundary_arrays
-        bc_id = bc.bc_id
-        n_hat = jnp.asarray(mesh.face_normals)
+    bc = equation_manager.boundary_arrays
+    if bc is None:
+        raise ValueError(
+            "boundary_arrays is required for JIT-safe execution. "
+            "Build it with equation_manager.build_boundary_arrays(...)."
+        )
 
-        U_R_inflow = _ghost_inflow(bc, equation_manager)
-        U_R_axis = _ghost_axisymmetric(U_L, n_hat, equation_manager)
-        U_R_wall = _ghost_wall(U_L, bc, bc_id, equation_manager)
-        U_R_wall_slip = _ghost_wall_slip(U_L, bc, bc_id, n_hat, equation_manager)
+    bc_id = bc.bc_id
+    n_hat = jnp.asarray(mesh.face_normals)
 
-        mask_inflow = bc_id == BC_INFLOW
-        mask_axis = bc_id == BC_AXISYMMETRIC
-        mask_wall = bc_id == BC_WALL
-        mask_wall_slip = bc_id == BC_WALL_SLIP
+    U_R_inflow = _ghost_inflow(bc, equation_manager)
+    U_R_axis = _ghost_axisymmetric(U_L, n_hat, equation_manager)
+    U_R_wall = _ghost_wall(U_L, bc, bc_id, equation_manager)
+    U_R_wall_slip = _ghost_wall_slip(U_L, bc, bc_id, n_hat, equation_manager)
 
-        U_R = jnp.where(mask_inflow[:, None], U_R_inflow, U_R)
-        U_R = jnp.where(mask_axis[:, None], U_R_axis, U_R)
-        U_R = jnp.where(mask_wall[:, None], U_R_wall, U_R)
-        U_R = jnp.where(mask_wall_slip[:, None], U_R_wall_slip, U_R)
-        return U_L, U_R
+    mask_inflow = bc_id == BC_INFLOW
+    mask_axis = bc_id == BC_AXISYMMETRIC
+    mask_wall = bc_id == BC_WALL
+    mask_wall_slip = bc_id == BC_WALL_SLIP
 
-    boundary_mask = face_right < 0
-    if jnp.any(boundary_mask):
-        tags = jnp.asarray(mesh.boundary_tags)
-        normals = jnp.asarray(mesh.face_normals)
-        # Process per tag to pass correct bc
-        for tag in jnp.unique(tags[boundary_mask]):
-            tag_val = int(tag)
-            if tag_val not in equation_manager.boundary_config.tag_to_bc:
-                raise ValueError(f"Missing boundary config for tag {tag_val}")
-            bc = equation_manager.boundary_config.tag_to_bc[tag_val]
-            bc_type = bc.get("type")
-            if bc_type is None:
-                raise ValueError(f"Boundary config for tag {tag_val} missing 'type'")
-            bc_params = {k: v for k, v in bc.items() if k != "type"}
-            tag_mask = boundary_mask & (tags == tag_val)
-            if not jnp.any(tag_mask):
-                continue
-            U_L_tag = U_L[tag_mask]
-            n_tag = normals[tag_mask]
-            U_R_tag = boundary_conditions.compute_ghost_state(
-                U_L_tag, n_tag, bc_type, bc_params, equation_manager
-            )
-            U_R = U_R.at[tag_mask].set(U_R_tag)
-
+    U_R = jnp.where(mask_inflow[:, None], U_R_inflow, U_R)
+    U_R = jnp.where(mask_axis[:, None], U_R_axis, U_R)
+    U_R = jnp.where(mask_wall[:, None], U_R_wall, U_R)
+    U_R = jnp.where(mask_wall_slip[:, None], U_R_wall_slip, U_R)
     return U_L, U_R
 
 
@@ -572,9 +590,9 @@ def run_scan(
     Note: boundary conditions must be converted to array form for JIT safety.
     """
     if equation_manager.boundary_arrays is None:
-        boundary_arrays = _build_boundary_arrays(mesh, equation_manager)
-        equation_manager = dataclasses.replace(
-            equation_manager, boundary_arrays=boundary_arrays
+        raise ValueError(
+            "boundary_arrays is required for JIT-safe execution. "
+            "Build it with equation_manager.build_boundary_arrays(...)."
         )
 
     if equation_manager.numerics_config.dt_mode == "cfl":

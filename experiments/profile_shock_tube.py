@@ -317,7 +317,8 @@ def build_2d_case(args, species_table, collision_integrals, reactions, transport
         }
     )
 
-    eq_manager_2d = eq2d_types.EquationManager2D(
+    eq_manager_2d = eq2d_manager.build_equation_manager(
+        mesh,
         species=species_table,
         collision_integrals=collision_integrals,
         reactions=reactions,

@@ -36,9 +36,9 @@ def compute_slip_wall_ghost(
     u_t_L = u_L * t_x + v_L * t_y
 
     # Mixture cp, cv_tr, gamma
-    cp = thermodynamic_relations.compute_cp(T_L, equation_manager.species)
+    cp_tr = thermodynamic_relations.compute_cp_tr(T_L, equation_manager.species)
     cv_tr = thermodynamic_relations.compute_cv_tr(T_L, equation_manager.species)
-    cp_mix = jnp.sum(Y_L * cp.T, axis=1)
+    cp_mix = jnp.sum(Y_L * cp_tr.T, axis=1)
     cv_tr_mix = jnp.sum(Y_L * cv_tr.T, axis=1)
     gamma = cp_mix / (cv_tr_mix + 1e-14)
 
@@ -57,21 +57,15 @@ def compute_slip_wall_ghost(
     cbar = jnp.sqrt(jnp.clip(8.0 * R_spec * T_L / jnp.pi, 1e-30, None))
     lambda_mfp = 3.0 * mu / jnp.clip(rho_L * cbar, 1e-30, None)
 
-    # Smoluchowski temperature jump (sigma_t=1 for Casseau)
+    # Smoluchowski temperature jump (Casseau form)
     sigma_t = jnp.clip(sigma_t, 1e-6, None)
     jump_coeff = (2.0 - sigma_t) / sigma_t
-    A_T = (
-        jump_coeff
-        * (2.0 * gamma / (gamma + 1.0))
-        * (lambda_mfp / jnp.clip(pr, 1e-30, None))
-    )
-    A_T = A_T / jnp.clip(wall_dist, 1e-12, None)
-    A_T = jnp.clip(A_T, -0.95, 0.95)
+    Kn = lambda_mfp / jnp.clip(wall_dist, 1e-12, None)
+    A_T = jump_coeff * (2.0 * gamma / (gamma + 1.0)) * (Kn / jnp.clip(pr, 1e-30, None))
+    # A_T = jnp.clip(A_T, -0.95, 0.95)
 
-    T_g = (Tw + A_T * T_L) / jnp.clip(1.0 + A_T, 1e-6, None)
-    T_g_v = (Tvw + A_T * Tv_L) / jnp.clip(1.0 + A_T, 1e-6, None)
-    T_gs = 2.0 * T_g - T_L
-    Tv_gs = 2.0 * T_g_v - Tv_L
+    T_gs = (2.0 * Tw + (A_T - 1.0) * T_L) / jnp.clip(1.0 + A_T, 1e-6, None)
+    Tv_gs = (2.0 * Tvw + (A_T - 1.0) * Tv_L) / jnp.clip(1.0 + A_T, 1e-6, None)
 
     # Maxwell slip (sigma_v=1 for Casseau)
     sigma_v = jnp.clip(sigma_v, 1e-6, None)

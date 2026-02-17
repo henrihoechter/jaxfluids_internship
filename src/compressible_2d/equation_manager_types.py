@@ -54,8 +54,16 @@ class EquationManager2D:
     reactions: chemistry_types.ReactionTable | None
     numerics_config: NumericsConfig2D
     boundary_config: BoundaryConditionConfig2D
-    boundary_arrays: BoundaryConditionArrays2D | None = None
+    boundary_arrays: BoundaryConditionArrays2D
     transport_model: TransportModelConfig = dataclasses.field(
         default_factory=TransportModelConfig
     )
     casseau_transport: transport_casseau.CasseauTransportTable | None = None
+
+    def __post_init__(self) -> None:
+        if self.boundary_arrays is None:
+            raise ValueError(
+                "boundary_arrays must be provided for JIT-safe execution. "
+                "Build it with equation_manager.build_boundary_arrays(...) "
+                "or equation_manager.build_equation_manager(...)."
+            )

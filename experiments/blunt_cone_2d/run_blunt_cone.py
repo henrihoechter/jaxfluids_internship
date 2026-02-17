@@ -122,7 +122,10 @@ def main() -> None:
         }
     )
 
-    eq_manager = equation_manager_types.EquationManager2D(
+    mesh = mesh_gmsh.read_gmsh(args.mesh)
+
+    eq_manager = equation_manager.build_equation_manager(
+        mesh,
         species=species,
         collision_integrals=collision_integrals,
         reactions=reactions,
@@ -133,8 +136,6 @@ def main() -> None:
         ),
         casseau_transport=casseau_transport,
     )
-
-    mesh = mesh_gmsh.read_gmsh(args.mesh)
 
     # Initialize freestream everywhere
     n_cells = mesh.cell_areas.shape[0]
