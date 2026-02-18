@@ -1,11 +1,19 @@
 """Boundary conditions for 2D axisymmetric solver."""
 
+import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
 from compressible_core import constants, thermodynamic_relations
 
-from .equation_manager_types import EquationManager2D
+from .boundary_conditions_types import (
+    BC_AXISYMMETRIC,
+    BC_INFLOW,
+    BC_WALL,
+    BC_WALL_SLIP,
+)
+from .equation_manager_types import BoundaryConditionArrays2D, EquationManager2D
+from .mesh_gmsh import Mesh2D
 from . import equation_manager_utils
 
 
@@ -99,6 +107,162 @@ def compute_slip_wall_ghost(
         T_V=Tv_gs,
         equation_manager=equation_manager,
     )
+
+
+def _ghost_inflow(
+    boundary_arrays: BoundaryConditionArrays2D,
+    equation_manager: EquationManager2D,
+) -> Float[Array, "n_faces n_variables"]:
+    return equation_manager_utils.compute_U_from_primitives(
+        Y_s=boundary_arrays.inflow_Y,
+        rho=boundary_arrays.inflow_rho,
+        u=boundary_arrays.inflow_u,
+        v=boundary_arrays.inflow_v,
+        T_tr=boundary_arrays.inflow_T,
+        T_V=boundary_arrays.inflow_Tv,
+        equation_manager=equation_manager,
+    )
+
+
+def _ghost_axisymmetric(
+    U_L: Float[Array, "n_faces n_variables"],
+    n_hat: Float[Array, "n_faces 2"],
+    equation_manager: EquationManager2D,
+) -> Float[Array, "n_faces n_variables"]:
+    Y_L, rho_L, u_L, v_L, T_L, Tv_L, _ = (
+        equation_manager_utils.extract_primitives_from_U(U_L, equation_manager)
+    )
+
+    n_x = n_hat[:, 0]
+    n_y = n_hat[:, 1]
+    t_x = -n_y
+    t_y = n_x
+
+    u_n = u_L * n_x + v_L * n_y
+    u_t = u_L * t_x + v_L * t_y
+
+    u_n_g = -u_n
+    u_t_g = u_t
+    u_g = u_n_g * n_x + u_t_g * t_x
+    v_g = u_n_g * n_y + u_t_g * t_y
+
+    return equation_manager_utils.compute_U_from_primitives(
+        Y_s=Y_L,
+        rho=rho_L,
+        u=u_g,
+        v=v_g,
+        T_tr=T_L,
+        T_V=Tv_L,
+        equation_manager=equation_manager,
+    )
+
+
+def _ghost_wall(
+    U_L: Float[Array, "n_faces n_variables"],
+    boundary_arrays: BoundaryConditionArrays2D,
+    bc_id: Array,
+    equation_manager: EquationManager2D,
+) -> Float[Array, "n_faces n_variables"]:
+    Y_L, rho_L, u_L, v_L, T_L, Tv_L, _ = (
+        equation_manager_utils.extract_primitives_from_U(U_L, equation_manager)
+    )
+
+    wall_mask = bc_id == BC_WALL
+    wall_count = jnp.sum(wall_mask)
+    wall_count_safe = jnp.maximum(wall_count, 1.0)
+    Tw_wall_mean = jnp.sum(T_L * wall_mask) / wall_count_safe
+    Tw_default = jnp.where(wall_count > 0, Tw_wall_mean, jnp.mean(T_L))
+
+    Tw = jnp.where(boundary_arrays.wall_has_Tw, boundary_arrays.wall_Tw, Tw_default)
+    Tvw = jnp.where(boundary_arrays.wall_has_Tvw, boundary_arrays.wall_Tvw, Tw)
+    Y = jnp.where(boundary_arrays.wall_has_Y[:, None], boundary_arrays.wall_Y, Y_L)
+
+    u_g = -u_L
+    v_g = -v_L
+
+    return equation_manager_utils.compute_U_from_primitives(
+        Y_s=Y,
+        rho=rho_L,
+        u=u_g,
+        v=v_g,
+        T_tr=Tw,
+        T_V=Tvw,
+        equation_manager=equation_manager,
+    )
+
+
+def _ghost_wall_slip(
+    U_L: Float[Array, "n_faces n_variables"],
+    boundary_arrays: BoundaryConditionArrays2D,
+    bc_id: Array,
+    n_hat: Float[Array, "n_faces 2"],
+    equation_manager: EquationManager2D,
+) -> Float[Array, "n_faces n_variables"]:
+    Y_L, rho_L, u_L, v_L, T_L, Tv_L, _ = (
+        equation_manager_utils.extract_primitives_from_U(U_L, equation_manager)
+    )
+
+    wall_mask = bc_id == BC_WALL_SLIP
+    wall_count = jnp.sum(wall_mask)
+    wall_count_safe = jnp.maximum(wall_count, 1.0)
+    Tw_wall_mean = jnp.sum(T_L * wall_mask) / wall_count_safe
+    Tw_default = jnp.where(wall_count > 0, Tw_wall_mean, jnp.mean(T_L))
+
+    Tw = jnp.where(boundary_arrays.wall_has_Tw, boundary_arrays.wall_Tw, Tw_default)
+    Tvw = jnp.where(boundary_arrays.wall_has_Tvw, boundary_arrays.wall_Tvw, Tw)
+    Y = jnp.where(boundary_arrays.wall_has_Y[:, None], boundary_arrays.wall_Y, Y_L)
+
+    return compute_slip_wall_ghost(
+        U_L=U_L,
+        n_hat=n_hat,
+        equation_manager=equation_manager,
+        Tw=Tw,
+        Tvw=Tvw,
+        Y_wall=Y,
+        wall_u=boundary_arrays.wall_u,
+        wall_v=boundary_arrays.wall_v,
+        wall_dist=boundary_arrays.wall_dist,
+        sigma_t=boundary_arrays.wall_sigma_t,
+        sigma_v=boundary_arrays.wall_sigma_v,
+    )
+
+
+@jax.named_call
+def compute_face_states(
+    U: Float[Array, "n_cells n_variables"],
+    mesh: Mesh2D,
+    equation_manager: EquationManager2D,
+) -> tuple[Float[Array, "n_faces n_variables"], Float[Array, "n_faces n_variables"]]:
+    face_left = jnp.asarray(mesh.face_left)
+    face_right = jnp.asarray(mesh.face_right)
+    U_L = U[face_left]
+    U_R = jnp.where(face_right[:, None] >= 0, U[face_right], U_L)
+
+    bc = equation_manager.boundary_arrays
+    if bc is None:
+        raise ValueError(
+            "boundary_arrays is required for JIT-safe execution. "
+            "Build it with compressible_2d.build_boundary_arrays(...)."
+        )
+
+    bc_id = bc.bc_id
+    n_hat = jnp.asarray(mesh.face_normals)
+
+    U_R_inflow = _ghost_inflow(bc, equation_manager)
+    U_R_axis = _ghost_axisymmetric(U_L, n_hat, equation_manager)
+    U_R_wall = _ghost_wall(U_L, bc, bc_id, equation_manager)
+    U_R_wall_slip = _ghost_wall_slip(U_L, bc, bc_id, n_hat, equation_manager)
+
+    mask_inflow = bc_id == BC_INFLOW
+    mask_axis = bc_id == BC_AXISYMMETRIC
+    mask_wall = bc_id == BC_WALL
+    mask_wall_slip = bc_id == BC_WALL_SLIP
+
+    U_R = jnp.where(mask_inflow[:, None], U_R_inflow, U_R)
+    U_R = jnp.where(mask_axis[:, None], U_R_axis, U_R)
+    U_R = jnp.where(mask_wall[:, None], U_R_wall, U_R)
+    U_R = jnp.where(mask_wall_slip[:, None], U_R_wall_slip, U_R)
+    return U_L, U_R
 
 
 def compute_ghost_state(

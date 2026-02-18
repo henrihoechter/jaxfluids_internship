@@ -2,7 +2,8 @@
 
 from .mesh_gmsh import Mesh2D, read_gmsh
 from .equation_manager_types import EquationManager2D, BoundaryConditionConfig2D
-from .equation_manager import build_equation_manager, build_boundary_arrays
+from .equation_manager_utils import build_equation_manager
+from .boundary_conditions_utils import build_boundary_arrays
 from .numerics_types import NumericsConfig2D, ClippingConfig2D
 
 __all__ = [

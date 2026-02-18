@@ -4,7 +4,10 @@ from jaxtyping import Array, Float
 import jax
 import jax.numpy as jnp
 
-from .equation_manager_types import EquationManager2D
+from compressible_core import chemistry_types
+from .boundary_conditions_utils import build_boundary_arrays
+from .equation_manager_types import BoundaryConditionConfig2D, EquationManager2D
+from .mesh_gmsh import Mesh2D
 from compressible_core import constants
 from compressible_core import thermodynamic_relations
 
@@ -174,3 +177,26 @@ def compute_U_from_primitives(
     U = U.at[:, n_species + 3].set(rho_Ev)
 
     return U
+
+
+def build_equation_manager(
+    mesh: Mesh2D,
+    *,
+    species: chemistry_types.SpeciesTable,
+    collision_integrals: chemistry_types.CollisionIntegralTable | None,
+    reactions: chemistry_types.ReactionTable | None,
+    numerics_config,
+    boundary_config: BoundaryConditionConfig2D,
+    transport_model,
+    casseau_transport=None,
+) -> EquationManager2D:
+    boundary_arrays = build_boundary_arrays(mesh, boundary_config, species)
+    return EquationManager2D(
+        species=species,
+        collision_integrals=collision_integrals,
+        reactions=reactions,
+        numerics_config=numerics_config,
+        boundary_arrays=boundary_arrays,
+        transport_model=transport_model,
+        casseau_transport=casseau_transport,
+    )

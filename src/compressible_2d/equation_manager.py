@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import math
 from typing import Tuple
 
@@ -11,24 +10,13 @@ import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array, Float
 
-from compressible_core import chemistry_types
 from .mesh_gmsh import Mesh2D
-from .equation_manager_types import (
-    BoundaryConditionArrays2D,
-    BoundaryConditionConfig2D,
-    EquationManager2D,
-)
+from .equation_manager_types import EquationManager2D
 from . import boundary_conditions
 from . import equation_manager_utils
 from . import solver
 from . import viscous_flux
 from . import source_terms
-
-BC_OUTFLOW = 0
-BC_INFLOW = 1
-BC_AXISYMMETRIC = 2
-BC_WALL = 3
-BC_WALL_SLIP = 4
 
 
 def _face_weights(mesh: Mesh2D, axisymmetric: bool) -> tuple[jnp.ndarray, jnp.ndarray]:
@@ -45,316 +33,11 @@ def _face_weights(mesh: Mesh2D, axisymmetric: bool) -> tuple[jnp.ndarray, jnp.nd
     return face_w, cell_w
 
 
-def _build_boundary_arrays(
-    mesh: Mesh2D,
-    boundary_config: BoundaryConditionConfig2D,
-    species: chemistry_types.SpeciesTable,
-) -> BoundaryConditionArrays2D:
-    n_faces = mesh.face_left.shape[0]
-    n_species = species.n_species
-
-    bc_id = np.full((n_faces,), -1, dtype=np.int32)
-    inflow_rho = np.ones((n_faces,), dtype=float)
-    inflow_u = np.zeros((n_faces,), dtype=float)
-    inflow_v = np.zeros((n_faces,), dtype=float)
-    inflow_T = np.full((n_faces,), 300.0, dtype=float)
-    inflow_Tv = np.full((n_faces,), 300.0, dtype=float)
-    inflow_Y = np.zeros((n_faces, n_species), dtype=float)
-    inflow_Y[:, 0] = 1.0
-
-    wall_Tw = np.zeros((n_faces,), dtype=float)
-    wall_Tvw = np.zeros((n_faces,), dtype=float)
-    wall_has_Tw = np.zeros((n_faces,), dtype=bool)
-    wall_has_Tvw = np.zeros((n_faces,), dtype=bool)
-    wall_Y = np.zeros((n_faces, n_species), dtype=float)
-    wall_has_Y = np.zeros((n_faces,), dtype=bool)
-    wall_u = np.zeros((n_faces,), dtype=float)
-    wall_v = np.zeros((n_faces,), dtype=float)
-    wall_sigma_t = np.ones((n_faces,), dtype=float)
-    wall_sigma_v = np.ones((n_faces,), dtype=float)
-
-    face_centroids = np.asarray(mesh.face_centroids)
-    cell_centroids = np.asarray(mesh.cell_centroids)
-    face_normals = np.asarray(mesh.face_normals)
-    face_left = np.asarray(mesh.face_left)
-    cell_to_face = face_centroids - cell_centroids[face_left]
-    wall_dist = np.abs(np.sum(cell_to_face * face_normals, axis=1))
-    wall_dist = np.clip(wall_dist, 1e-12, None)
-
-    tags = np.asarray(mesh.boundary_tags)
-    tag_to_bc = boundary_config.tag_to_bc
-    for tag, bc in tag_to_bc.items():
-        mask = tags == tag
-        if not np.any(mask):
-            continue
-        bc_type = bc.get("type")
-        if bc_type == "outflow":
-            bc_id[mask] = BC_OUTFLOW
-        elif bc_type == "inflow":
-            bc_id[mask] = BC_INFLOW
-            inflow_rho[mask] = float(bc["rho"])
-            inflow_u[mask] = float(bc["u"])
-            inflow_v[mask] = float(bc["v"])
-            inflow_T[mask] = float(bc["T"])
-            inflow_Tv[mask] = float(bc.get("Tv", bc["T"]))
-            Y = np.asarray(bc["Y"], dtype=float)
-            if Y.ndim != 1 or Y.shape[0] != n_species:
-                raise ValueError("Inflow Y must have shape (n_species,)")
-            inflow_Y[mask, :] = Y[None, :]
-        elif bc_type == "axisymmetric":
-            bc_id[mask] = BC_AXISYMMETRIC
-        elif bc_type == "wall":
-            bc_id[mask] = BC_WALL
-            if "Tw" in bc:
-                wall_Tw[mask] = float(bc["Tw"])
-                wall_has_Tw[mask] = True
-            if "Tvw" in bc:
-                wall_Tvw[mask] = float(bc["Tvw"])
-                wall_has_Tvw[mask] = True
-            if "Y_wall" in bc:
-                Yw = np.asarray(bc["Y_wall"], dtype=float)
-                if Yw.ndim != 1 or Yw.shape[0] != n_species:
-                    raise ValueError("Y_wall must have shape (n_species,)")
-                wall_Y[mask, :] = Yw[None, :]
-                wall_has_Y[mask] = True
-        elif bc_type == "wall_slip":
-            bc_id[mask] = BC_WALL_SLIP
-            if "Tw" in bc:
-                wall_Tw[mask] = float(bc["Tw"])
-                wall_has_Tw[mask] = True
-            if "Tvw" in bc:
-                wall_Tvw[mask] = float(bc["Tvw"])
-                wall_has_Tvw[mask] = True
-            if "Y_wall" in bc:
-                Yw = np.asarray(bc["Y_wall"], dtype=float)
-                if Yw.ndim != 1 or Yw.shape[0] != n_species:
-                    raise ValueError("Y_wall must have shape (n_species,)")
-                wall_Y[mask, :] = Yw[None, :]
-                wall_has_Y[mask] = True
-            if "u_wall" in bc:
-                wall_u[mask] = float(bc["u_wall"])
-            if "v_wall" in bc:
-                wall_v[mask] = float(bc["v_wall"])
-            if "sigma_t" in bc:
-                wall_sigma_t[mask] = float(bc["sigma_t"])
-            if "sigma_v" in bc:
-                wall_sigma_v[mask] = float(bc["sigma_v"])
-        else:
-            raise ValueError(f"Unknown boundary condition type: {bc_type}")
-
-    boundary_mask = mesh.face_right < 0
-    missing = boundary_mask & (bc_id < 0)
-    if np.any(missing):
-        missing_tags = np.unique(tags[missing]).tolist()
-        raise ValueError(f"Missing boundary config for tags: {missing_tags}")
-
-    return BoundaryConditionArrays2D(
-        bc_id=jnp.asarray(bc_id),
-        inflow_rho=jnp.asarray(inflow_rho),
-        inflow_u=jnp.asarray(inflow_u),
-        inflow_v=jnp.asarray(inflow_v),
-        inflow_T=jnp.asarray(inflow_T),
-        inflow_Tv=jnp.asarray(inflow_Tv),
-        inflow_Y=jnp.asarray(inflow_Y),
-        wall_Tw=jnp.asarray(wall_Tw),
-        wall_Tvw=jnp.asarray(wall_Tvw),
-        wall_has_Tw=jnp.asarray(wall_has_Tw),
-        wall_has_Tvw=jnp.asarray(wall_has_Tvw),
-        wall_Y=jnp.asarray(wall_Y),
-        wall_has_Y=jnp.asarray(wall_has_Y),
-        wall_u=jnp.asarray(wall_u),
-        wall_v=jnp.asarray(wall_v),
-        wall_sigma_t=jnp.asarray(wall_sigma_t),
-        wall_sigma_v=jnp.asarray(wall_sigma_v),
-        wall_dist=jnp.asarray(wall_dist),
-    )
 
 
-def build_boundary_arrays(
-    mesh: Mesh2D,
-    boundary_config: BoundaryConditionConfig2D,
-    species: chemistry_types.SpeciesTable,
-) -> BoundaryConditionArrays2D:
-    return _build_boundary_arrays(mesh, boundary_config, species)
+from .equation_manager_utils import build_equation_manager
 
 
-def build_equation_manager(
-    mesh: Mesh2D,
-    *,
-    species: chemistry_types.SpeciesTable,
-    collision_integrals: chemistry_types.CollisionIntegralTable | None,
-    reactions: chemistry_types.ReactionTable | None,
-    numerics_config,
-    boundary_config: BoundaryConditionConfig2D,
-    transport_model,
-    casseau_transport=None,
-) -> EquationManager2D:
-    boundary_arrays = _build_boundary_arrays(mesh, boundary_config, species)
-    return EquationManager2D(
-        species=species,
-        collision_integrals=collision_integrals,
-        reactions=reactions,
-        numerics_config=numerics_config,
-        boundary_arrays=boundary_arrays,
-        transport_model=transport_model,
-        casseau_transport=casseau_transport,
-    )
-
-
-def _ghost_inflow(
-    boundary_arrays: BoundaryConditionArrays2D,
-    equation_manager: EquationManager2D,
-) -> Float[Array, "n_faces n_variables"]:
-    return equation_manager_utils.compute_U_from_primitives(
-        Y_s=boundary_arrays.inflow_Y,
-        rho=boundary_arrays.inflow_rho,
-        u=boundary_arrays.inflow_u,
-        v=boundary_arrays.inflow_v,
-        T_tr=boundary_arrays.inflow_T,
-        T_V=boundary_arrays.inflow_Tv,
-        equation_manager=equation_manager,
-    )
-
-
-def _ghost_axisymmetric(
-    U_L: Float[Array, "n_faces n_variables"],
-    n_hat: Float[Array, "n_faces 2"],
-    equation_manager: EquationManager2D,
-) -> Float[Array, "n_faces n_variables"]:
-    Y_L, rho_L, u_L, v_L, T_L, Tv_L, _ = (
-        equation_manager_utils.extract_primitives_from_U(U_L, equation_manager)
-    )
-
-    n_x = n_hat[:, 0]
-    n_y = n_hat[:, 1]
-    t_x = -n_y
-    t_y = n_x
-
-    u_n = u_L * n_x + v_L * n_y
-    u_t = u_L * t_x + v_L * t_y
-
-    u_n_g = -u_n
-    u_t_g = u_t
-    u_g = u_n_g * n_x + u_t_g * t_x
-    v_g = u_n_g * n_y + u_t_g * t_y
-
-    return equation_manager_utils.compute_U_from_primitives(
-        Y_s=Y_L,
-        rho=rho_L,
-        u=u_g,
-        v=v_g,
-        T_tr=T_L,
-        T_V=Tv_L,
-        equation_manager=equation_manager,
-    )
-
-
-def _ghost_wall(
-    U_L: Float[Array, "n_faces n_variables"],
-    boundary_arrays: BoundaryConditionArrays2D,
-    bc_id: Array,
-    equation_manager: EquationManager2D,
-) -> Float[Array, "n_faces n_variables"]:
-    Y_L, rho_L, u_L, v_L, T_L, Tv_L, _ = (
-        equation_manager_utils.extract_primitives_from_U(U_L, equation_manager)
-    )
-
-    wall_mask = bc_id == BC_WALL
-    wall_count = jnp.sum(wall_mask)
-    wall_count_safe = jnp.maximum(wall_count, 1.0)
-    Tw_wall_mean = jnp.sum(T_L * wall_mask) / wall_count_safe
-    Tw_default = jnp.where(wall_count > 0, Tw_wall_mean, jnp.mean(T_L))
-
-    Tw = jnp.where(boundary_arrays.wall_has_Tw, boundary_arrays.wall_Tw, Tw_default)
-    Tvw = jnp.where(boundary_arrays.wall_has_Tvw, boundary_arrays.wall_Tvw, Tw)
-    Y = jnp.where(boundary_arrays.wall_has_Y[:, None], boundary_arrays.wall_Y, Y_L)
-
-    u_g = -u_L
-    v_g = -v_L
-
-    return equation_manager_utils.compute_U_from_primitives(
-        Y_s=Y,
-        rho=rho_L,
-        u=u_g,
-        v=v_g,
-        T_tr=Tw,
-        T_V=Tvw,
-        equation_manager=equation_manager,
-    )
-
-
-def _ghost_wall_slip(
-    U_L: Float[Array, "n_faces n_variables"],
-    boundary_arrays: BoundaryConditionArrays2D,
-    bc_id: Array,
-    n_hat: Float[Array, "n_faces 2"],
-    equation_manager: EquationManager2D,
-) -> Float[Array, "n_faces n_variables"]:
-    Y_L, rho_L, u_L, v_L, T_L, Tv_L, _ = (
-        equation_manager_utils.extract_primitives_from_U(U_L, equation_manager)
-    )
-
-    wall_mask = bc_id == BC_WALL_SLIP
-    wall_count = jnp.sum(wall_mask)
-    wall_count_safe = jnp.maximum(wall_count, 1.0)
-    Tw_wall_mean = jnp.sum(T_L * wall_mask) / wall_count_safe
-    Tw_default = jnp.where(wall_count > 0, Tw_wall_mean, jnp.mean(T_L))
-
-    Tw = jnp.where(boundary_arrays.wall_has_Tw, boundary_arrays.wall_Tw, Tw_default)
-    Tvw = jnp.where(boundary_arrays.wall_has_Tvw, boundary_arrays.wall_Tvw, Tw)
-    Y = jnp.where(boundary_arrays.wall_has_Y[:, None], boundary_arrays.wall_Y, Y_L)
-
-    return boundary_conditions.compute_slip_wall_ghost(
-        U_L=U_L,
-        n_hat=n_hat,
-        equation_manager=equation_manager,
-        Tw=Tw,
-        Tvw=Tvw,
-        Y_wall=Y,
-        wall_u=boundary_arrays.wall_u,
-        wall_v=boundary_arrays.wall_v,
-        wall_dist=boundary_arrays.wall_dist,
-        sigma_t=boundary_arrays.wall_sigma_t,
-        sigma_v=boundary_arrays.wall_sigma_v,
-    )
-
-
-@jax.named_call
-def compute_face_states(
-    U: Float[Array, "n_cells n_variables"],
-    mesh: Mesh2D,
-    equation_manager: EquationManager2D,
-) -> tuple[Float[Array, "n_faces n_variables"], Float[Array, "n_faces n_variables"]]:
-    face_left = jnp.asarray(mesh.face_left)
-    face_right = jnp.asarray(mesh.face_right)
-    U_L = U[face_left]
-    U_R = jnp.where(face_right[:, None] >= 0, U[face_right], U_L)
-
-    bc = equation_manager.boundary_arrays
-    if bc is None:
-        raise ValueError(
-            "boundary_arrays is required for JIT-safe execution. "
-            "Build it with equation_manager.build_boundary_arrays(...)."
-        )
-
-    bc_id = bc.bc_id
-    n_hat = jnp.asarray(mesh.face_normals)
-
-    U_R_inflow = _ghost_inflow(bc, equation_manager)
-    U_R_axis = _ghost_axisymmetric(U_L, n_hat, equation_manager)
-    U_R_wall = _ghost_wall(U_L, bc, bc_id, equation_manager)
-    U_R_wall_slip = _ghost_wall_slip(U_L, bc, bc_id, n_hat, equation_manager)
-
-    mask_inflow = bc_id == BC_INFLOW
-    mask_axis = bc_id == BC_AXISYMMETRIC
-    mask_wall = bc_id == BC_WALL
-    mask_wall_slip = bc_id == BC_WALL_SLIP
-
-    U_R = jnp.where(mask_inflow[:, None], U_R_inflow, U_R)
-    U_R = jnp.where(mask_axis[:, None], U_R_axis, U_R)
-    U_R = jnp.where(mask_wall[:, None], U_R_wall, U_R)
-    U_R = jnp.where(mask_wall_slip[:, None], U_R_wall_slip, U_R)
-    return U_L, U_R
 
 
 @jax.named_call
@@ -389,7 +72,7 @@ def compute_cfl_dt(
     equation_manager: EquationManager2D,
 ) -> float:
     # Compute max wave speed per face
-    U_L, U_R = compute_face_states(U, mesh, equation_manager)
+    U_L, U_R = boundary_conditions.compute_face_states(U, mesh, equation_manager)
     n_hat = jnp.asarray(mesh.face_normals)
     # Use convective eigenvalues
     Y_L, rho_L, u_L, v_L, T_L, Tv_L, p_L = viscous_flux.extract_primitives(
@@ -434,7 +117,7 @@ def _compute_dU_dt(
     mesh: Mesh2D,
     equation_manager: EquationManager2D,
 ) -> Float[Array, "n_cells n_variables"]:
-    U_L, U_R = compute_face_states(U, mesh, equation_manager)
+    U_L, U_R = boundary_conditions.compute_face_states(U, mesh, equation_manager)
     normals = jnp.asarray(mesh.face_normals)
 
     face_primitives_L = equation_manager_utils.extract_primitives(U_L, equation_manager)
@@ -591,7 +274,7 @@ def run_scan(
     if equation_manager.boundary_arrays is None:
         raise ValueError(
             "boundary_arrays is required for JIT-safe execution. "
-            "Build it with equation_manager.build_boundary_arrays(...)."
+            "Build it with compressible_2d.build_boundary_arrays(...)."
         )
 
     if equation_manager.numerics_config.dt_mode == "cfl":
