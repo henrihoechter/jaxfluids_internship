@@ -8,7 +8,8 @@ from jaxtyping import Float, Array, Int
 from compressible_core.chemistry_types import SpeciesTable, ReactionTable
 from compressible_core import (
     constants,
-    energy_models,
+    energy_models_types,
+    energy_models_utils,
     chemistry,
     chemistry_types,
 )
@@ -182,7 +183,7 @@ def load_equilibrium_enthalpy_curve_fits(json_path: str, species_name: str) -> t
 def load_species_table(
     species_names: Sequence[str],
     general_data_path: str,
-    energy_model_config: energy_models.EnergyModelConfig,
+    energy_model_config: energy_models_types.EnergyModelConfig,
 ) -> SpeciesTable:
     """Load species data and return as SpeciesTable.
 
@@ -274,7 +275,7 @@ def load_species_table(
         names_tuple, charge, is_monoatomic, vibrational_relaxation_raw
     )
 
-    energy_model = energy_models.build_energy_model_from_config(
+    energy_model = energy_models_utils.build_energy_model_from_config(
         energy_model_config,
         species_names=names_tuple,
         T_ref=T_ref,
@@ -284,7 +285,7 @@ def load_species_table(
 
     theta_vib = jnp.full((len(names_tuple),), jnp.nan)
     if energy_model_config.model.lower() == "bird" and energy_model_config.data_path:
-        theta_vib = energy_models.load_bird_characteristic_temperatures(
+        theta_vib = energy_models_utils.load_bird_characteristic_temperatures(
             energy_model_config.data_path, names_tuple
         )
 

@@ -67,7 +67,7 @@ def compute_source_terms(
 
     # Term 6: Vibrational-translational relaxation
     Q_TV = compute_vibrational_relaxation(U, equation_manager, primitives=primitives)
-    # Q_TV = jnp.zeros_like(Q_TV)
+    Q_TV = jnp.zeros_like(Q_TV)
 
     Q_VV = jnp.zeros_like(Q_TV)  # TODO: implement vibrational-vibrational relaxation
     Q_eT = jnp.zeros_like(Q_TV)  # TODO: implement electron-translational relaxation

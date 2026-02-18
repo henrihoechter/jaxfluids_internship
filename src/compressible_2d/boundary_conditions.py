@@ -3,7 +3,7 @@
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from compressible_core import constants, thermodynamic_relations, transport_models
+from compressible_core import constants, thermodynamic_relations
 
 from .equation_manager_types import EquationManager2D
 from . import equation_manager_utils
@@ -43,9 +43,16 @@ def compute_slip_wall_ghost(
     gamma = cp_mix / (cv_tr_mix + 1e-14)
 
     # Transport properties for Prandtl number and mean free path
-    mu, eta_t, eta_r, _eta_v, _D_s = transport_models.compute_transport_properties(
-        T_L, Tv_L, p_L, Y_L, rho_L, equation_manager
-    )
+    if equation_manager.transport_model is None:
+        mu = jnp.zeros_like(T_L)
+        eta_t = jnp.zeros_like(T_L)
+        eta_r = jnp.zeros_like(T_L)
+    else:
+        mu, eta_t, eta_r, _eta_v, _D_s = (
+            equation_manager.transport_model.compute_transport_properties(
+                T_L, Tv_L, p_L, Y_L, rho_L
+            )
+        )
     k_tr = eta_t + eta_r
     pr = mu * cp_mix / jnp.clip(k_tr, 1e-30, None)
 
@@ -55,7 +62,7 @@ def compute_slip_wall_ghost(
     M_mix = 1.0 / jnp.clip(denom, 1e-30, None)
     R_spec = constants.R_universal / M_mix
     cbar = jnp.sqrt(jnp.clip(8.0 * R_spec * T_L / jnp.pi, 1e-30, None))
-    lambda_mfp = 3.0 * mu / jnp.clip(rho_L * cbar, 1e-30, None)
+    lambda_mfp = 3.0 * mu / jnp.clip(rho_L * cbar, 1e-30, None)  # mean free path
 
     # Smoluchowski temperature jump (Casseau form)
     sigma_t = jnp.clip(sigma_t, 1e-6, None)

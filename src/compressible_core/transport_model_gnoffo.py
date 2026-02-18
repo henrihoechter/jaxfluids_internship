@@ -1,24 +1,13 @@
-"""Transport property calculations for two-temperature model.
+"""Gnoffo (TP-2867) transport property calculations for two-temperature model.
 
-This module implements transport property calculations following NASA TP-2867
+Implements transport property calculations following NASA TP-2867
 (Gnoffo et al., 1989). The approach uses collision integrals tabulated at
 reference temperatures and interpolated for arbitrary temperatures.
-
-Key equations from TP-2867:
-- Eq. 67: Collision integral interpolation
-- Eq. 69-70: Modified collision integrals Δ^(1) and Δ^(2)
-- Eq. 72: Mixture viscosity
-- Eq. 73: Translational thermal conductivity
-- Eq. 75: Rotational thermal conductivity
-- Eq. 77: Vibrational thermal conductivity
-- Eq. 79: Binary diffusion coefficient
-- Eq. 81: Effective mixture diffusion
 """
 
 from __future__ import annotations
+
 from typing import TYPE_CHECKING
-import json
-from pathlib import Path
 
 import jax.numpy as jnp
 from jaxtyping import Array, Float
@@ -29,16 +18,12 @@ if TYPE_CHECKING:
     from compressible_core.chemistry_types import CollisionIntegralTable
 
 
-# Physical constants
-K_BOLTZMANN = 1.380649e-23  # Boltzmann constant [J/K]
-N_AVOGADRO = 6.02214076e23  # Avogadro's number [1/mol]
-R_UNIVERSAL = constants.R_universal  # Universal gas constant [J/(mol·K)]
-
 # Reference temperatures for collision integral interpolation
 T_REF_LOW = 2000.0  # [K]
 T_REF_HIGH = 4000.0  # [K]
 LN_T_REF_LOW = jnp.log(T_REF_LOW)
 LN_T_REF_HIGH = jnp.log(T_REF_HIGH)
+R_UNIVERSAL = constants.R_universal  # Universal gas constant [J/(mol·K)]
 
 
 def interpolate_collision_integral(
@@ -450,46 +435,3 @@ def compute_effective_diffusion_coefficient(
     D_s = numerator / jnp.clip(denominator, 1e-30, None)
 
     return D_s
-
-
-def load_collision_integrals_from_json(filepath: str | Path) -> dict:
-    """Load collision integral data from JSON file.
-
-    Args:
-        filepath: Path to JSON file
-
-    Returns:
-        Dictionary with collision integral data
-    """
-    with open(filepath, "r") as f:
-        data = json.load(f)
-    return data
-
-
-def create_collision_integral_table_from_json(filepath: str | Path):
-    """Create CollisionIntegralTable from JSON file.
-
-    Args:
-        filepath: Path to collision integrals JSON file
-
-    Returns:
-        CollisionIntegralTable instance
-    """
-    from compressible_core.chemistry_types import CollisionIntegralTable
-
-    data = load_collision_integrals_from_json(filepath)
-    pairs = data["pairs"]
-
-    species_pairs = tuple((p["s"], p["r"]) for p in pairs)
-    omega_11_2000K = jnp.array([p["omega_11_2000"] for p in pairs])
-    omega_11_4000K = jnp.array([p["omega_11_4000"] for p in pairs])
-    omega_22_2000K = jnp.array([p["omega_22_2000"] for p in pairs])
-    omega_22_4000K = jnp.array([p["omega_22_4000"] for p in pairs])
-
-    return CollisionIntegralTable(
-        species_pairs=species_pairs,
-        omega_11_2000K=omega_11_2000K,
-        omega_11_4000K=omega_11_4000K,
-        omega_22_2000K=omega_22_2000K,
-        omega_22_4000K=omega_22_4000K,
-    )

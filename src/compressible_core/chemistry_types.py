@@ -9,7 +9,7 @@ import jaxtyping as jt
 from jaxtyping import Array, Float, Int
 
 if TYPE_CHECKING:
-    from compressible_core.energy_models import EnergyModel
+    from compressible_core.energy_models_types import EnergyModel
 
 
 ForwardRateFn = Callable[

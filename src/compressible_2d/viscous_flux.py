@@ -9,7 +9,6 @@ from .mesh_gmsh import Mesh2D
 from .equation_manager_types import EquationManager2D
 from . import equation_manager_utils
 from compressible_core import thermodynamic_relations
-from compressible_core import transport_models
 
 
 def extract_primitives(
@@ -102,6 +101,8 @@ def compute_viscous_flux_faces(
     face_primitives_R: equation_manager_utils.Primitives2D | None = None,
 ) -> Float[Array, "n_faces n_variables"]:
     n_species = equation_manager.species.n_species
+    if equation_manager.transport_model is None:
+        return jnp.zeros_like(U_L)
 
     face_left = jnp.asarray(mesh.face_left)
     face_right = jnp.asarray(mesh.face_right)
@@ -112,8 +113,10 @@ def compute_viscous_flux_faces(
     Y, rho, u, v, T, Tv, p = cell_primitives
 
     # Transport properties at cells
-    mu, eta_t, eta_r, eta_v, D_s = transport_models.compute_transport_properties(
-        T, Tv, p, Y, rho, equation_manager
+    mu, eta_t, eta_r, eta_v, D_s = (
+        equation_manager.transport_model.compute_transport_properties(
+            T, Tv, p, Y, rho
+        )
     )
 
     # Face primitives (include boundary ghost states via U_R)

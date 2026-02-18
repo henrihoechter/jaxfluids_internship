@@ -23,7 +23,6 @@ import jax.numpy as jnp
 from jaxtyping import Array, Float
 
 from compressible_1d import equation_manager_utils
-from compressible_core import transport_models
 from compressible_core import thermodynamic_relations
 
 if TYPE_CHECKING:
@@ -216,8 +215,10 @@ def compute_viscous_flux(
     # Extract velocity
     u = U[:, n_species] / rho
 
-    mu, eta_t, eta_r, eta_v, D_s = transport_models.compute_transport_properties(
-        T, T_v, p, Y_s, rho, equation_manager
+    mu, eta_t, eta_r, eta_v, D_s = (
+        equation_manager.transport_model.compute_transport_properties(
+            T, T_v, p, Y_s, rho
+        )
     )
 
     # Compute gradients at interfaces

@@ -1,17 +1,13 @@
 import dataclasses
-from typing import Literal
 
 from jaxtyping import Array, Bool, Float, Int
 
 from compressible_core import chemistry_types
-from compressible_core import transport_casseau
+from compressible_core import transport_casseau_types
+from compressible_core import transport_models_types
 from .numerics_types import NumericsConfig2D
 
-
-@dataclasses.dataclass(frozen=True, slots=True)
-class TransportModelConfig:
-    model: Literal["gnoffo", "casseau"] = dataclasses.field(default="gnoffo")
-    include_diffusion: bool = dataclasses.field(default=True)
+TransportModel = transport_models_types.TransportModel
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -53,17 +49,6 @@ class EquationManager2D:
     collision_integrals: chemistry_types.CollisionIntegralTable | None
     reactions: chemistry_types.ReactionTable | None
     numerics_config: NumericsConfig2D
-    boundary_config: BoundaryConditionConfig2D
     boundary_arrays: BoundaryConditionArrays2D
-    transport_model: TransportModelConfig = dataclasses.field(
-        default_factory=TransportModelConfig
-    )
-    casseau_transport: transport_casseau.CasseauTransportTable | None = None
-
-    def __post_init__(self) -> None:
-        if self.boundary_arrays is None:
-            raise ValueError(
-                "boundary_arrays must be provided for JIT-safe execution. "
-                "Build it with equation_manager.build_boundary_arrays(...) "
-                "or equation_manager.build_equation_manager(...)."
-            )
+    transport_model: TransportModel | None = dataclasses.field(default=None)
+    casseau_transport: transport_casseau_types.CasseauTransportTable | None = None

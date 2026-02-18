@@ -14,7 +14,6 @@ from compressible_1d import source_terms
 from compressible_1d import equation_manager_types
 from compressible_1d import viscous_flux as viscous_flux_module
 from compressible_1d import equation_manager_utils
-from compressible_core import transport_models
 from compressible_core import thermodynamic_relations
 from compressible_core.diagnose import runtime_check_array_sizes
 
@@ -55,8 +54,10 @@ def check_diffusive_cfl(
         U, equation_manager
     )
 
-    mu, eta_t, eta_r, _, D_s = transport_models.compute_transport_properties(
-        T, T_v, p, Y_s, rho, equation_manager
+    mu, eta_t, eta_r, _, D_s = (
+        equation_manager.transport_model.compute_transport_properties(
+            T, T_v, p, Y_s, rho
+        )
     )
 
     eta = eta_t + eta_r

@@ -3,21 +3,11 @@ from typing import Literal
 import jax
 
 from compressible_core import chemistry_types
-from compressible_core import transport_casseau
+from compressible_core import transport_casseau_types
+from compressible_core import transport_models_types
 from compressible_1d import numerics_types
 
-
-@jax.tree_util.register_dataclass
-@dataclasses.dataclass(frozen=True, slots=True)
-class TransportModelConfig:
-    """Configuration for transport property model selection."""
-
-    model: Literal["gnoffo", "casseau"] = dataclasses.field(
-        default="gnoffo", metadata=dict(static=True)
-    )
-    include_diffusion: bool = dataclasses.field(
-        default=True, metadata=dict(static=True)
-    )
+TransportModel = transport_models_types.TransportModel
 
 
 @jax.tree_util.register_dataclass
@@ -31,7 +21,7 @@ class EquationManager:
         reactions: Chemical reaction mechanism (None for frozen chemistry).
         numerics_config: Numerical discretization parameters.
         boundary_condition: Type of boundary condition to apply.
-        transport_model: Transport model selection and options.
+        transport_model: Transport model callable (or None for inviscid).
         casseau_transport: Casseau transport data (optional).
     """
 
@@ -46,7 +36,7 @@ class EquationManager:
     boundary_condition: Literal["periodic", "reflective", "transmissive"] = (
         dataclasses.field(metadata=dict(static=True))
     )
-    transport_model: TransportModelConfig = dataclasses.field(
-        default=TransportModelConfig(), metadata=dict(static=True)
+    transport_model: TransportModel | None = dataclasses.field(
+        default=None, metadata=dict(static=True)
     )
-    casseau_transport: transport_casseau.CasseauTransportTable | None = None
+    casseau_transport: transport_casseau_types.CasseauTransportTable | None = None

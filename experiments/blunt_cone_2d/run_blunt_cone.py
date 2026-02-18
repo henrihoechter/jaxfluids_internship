@@ -9,7 +9,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from compressible_core import chemistry_utils, energy_models, transport_casseau
-from compressible_core import transport as transport_core
+from compressible_core import transport_model_gnoffo_utils as transport_core
 from compressible_core import chemistry
 
 from compressible_2d import mesh_gmsh

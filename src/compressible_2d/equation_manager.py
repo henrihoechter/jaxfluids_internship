@@ -195,7 +195,6 @@ def build_equation_manager(
         collision_integrals=collision_integrals,
         reactions=reactions,
         numerics_config=numerics_config,
-        boundary_config=boundary_config,
         boundary_arrays=boundary_arrays,
         transport_model=transport_model,
         casseau_transport=casseau_transport,
