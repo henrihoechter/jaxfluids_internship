@@ -55,8 +55,9 @@ def compute_slip_wall_ghost(
         mu = jnp.zeros_like(T_L)
         eta_t = jnp.zeros_like(T_L)
         eta_r = jnp.zeros_like(T_L)
+        eta_v = jnp.zeros_like(T_L)
     else:
-        mu, eta_t, eta_r, _eta_v, _D_s = (
+        mu, eta_t, eta_r, eta_v, _D_s = (
             equation_manager.transport_model.compute_transport_properties(
                 T_L, Tv_L, p_L, Y_L, rho_L
             )
@@ -64,23 +65,32 @@ def compute_slip_wall_ghost(
     k_tr = eta_t + eta_r
     pr = mu * cp_mix / jnp.clip(k_tr, 1e-30, None)
 
-    # Mean free path from kinetic theory: lambda = 3*mu / (rho * cbar)
+    # Mean free path from kinetic theory (Chapman-Enskog hard-sphere):
+    # lambda = (16/5) * mu / (rho * cbar)
     M_s = equation_manager.species.molar_masses
     denom = jnp.sum(Y_L / M_s[None, :], axis=1)
     M_mix = 1.0 / jnp.clip(denom, 1e-30, None)
     R_spec = constants.R_universal / M_mix
     cbar = jnp.sqrt(jnp.clip(8.0 * R_spec * T_L / jnp.pi, 1e-30, None))
-    lambda_mfp = 3.0 * mu / jnp.clip(rho_L * cbar, 1e-30, None)  # mean free path
+    lambda_mfp = (16.0 / 5.0) * mu / jnp.clip(rho_L * cbar, 1e-30, None)
 
-    # Smoluchowski temperature jump (Casseau form)
+    # Smoluchowski temperature jump (Casseau form) — translational-rotational
     sigma_t = jnp.clip(sigma_t, 1e-6, None)
     jump_coeff = (2.0 - sigma_t) / sigma_t
     Kn = lambda_mfp / jnp.clip(wall_dist, 1e-12, None)
     A_T = jump_coeff * (2.0 * gamma / (gamma + 1.0)) * (Kn / jnp.clip(pr, 1e-30, None))
-    # A_T = jnp.clip(A_T, -0.95, 0.95)
 
     T_gs = (2.0 * Tw + (A_T - 1.0) * T_L) / jnp.clip(1.0 + A_T, 1e-6, None)
-    Tv_gs = (2.0 * Tvw + (A_T - 1.0) * Tv_L) / jnp.clip(1.0 + A_T, 1e-6, None)
+    T_gs = jnp.clip(T_gs, 1.0, None)
+
+    # Smoluchowski temperature jump — vibrational (uses eta_v and cv_ve)
+    cv_v = thermodynamic_relations.compute_cv_ve(Tv_L, equation_manager.species)
+    cv_v_mix = jnp.sum(Y_L * cv_v.T, axis=1)
+    pr_v = mu * cv_v_mix / jnp.clip(eta_v, 1e-30, None)
+    A_Tv = jump_coeff * (2.0 * gamma / (gamma + 1.0)) * (Kn / jnp.clip(pr_v, 1e-30, None))
+
+    Tv_gs = (2.0 * Tvw + (A_Tv - 1.0) * Tv_L) / jnp.clip(1.0 + A_Tv, 1e-6, None)
+    Tv_gs = jnp.clip(Tv_gs, 1.0, None)
 
     # Maxwell slip (sigma_v=1 for Casseau)
     sigma_v = jnp.clip(sigma_v, 1e-6, None)
@@ -177,16 +187,22 @@ def _ghost_wall(
     Tvw = jnp.where(boundary_arrays.wall_has_Tvw, boundary_arrays.wall_Tvw, Tw)
     Y = jnp.where(boundary_arrays.wall_has_Y[:, None], boundary_arrays.wall_Y, Y_L)
 
+    # No-slip: reflect velocity so that the face-averaged velocity is zero at the wall.
     u_g = -u_L
     v_g = -v_L
+
+    # Dirichlet temperature: set ghost so T_face = (T_L + T_ghost)/2 = Tw exactly.
+    # => T_ghost = 2*Tw - T_L
+    T_ghost = 2.0 * Tw - T_L
+    Tv_ghost = 2.0 * Tvw - Tv_L
 
     return equation_manager_utils.compute_U_from_primitives(
         Y_s=Y,
         rho=rho_L,
         u=u_g,
         v=v_g,
-        T_tr=Tw,
-        T_V=Tvw,
+        T_tr=T_ghost,
+        T_V=Tv_ghost,
         equation_manager=equation_manager,
     )
 
@@ -325,7 +341,8 @@ def compute_ghost_state(
         )
 
     if bc_type == "wall":
-        # No-slip isothermal wall by default
+        # No-slip isothermal wall: Dirichlet temperature via ghost cell.
+        # Ghost is chosen so T_face = (T_L + T_ghost)/2 = Tw => T_ghost = 2*Tw - T_L.
         Tw = float(bc_params.get("Tw", T_L.mean()))
         Tvw = float(bc_params.get("Tvw", Tw))
         u_g = -u_L
@@ -337,13 +354,15 @@ def compute_ghost_state(
             Y = jnp.asarray(Y_wall, dtype=U_L.dtype)
             if Y.ndim == 1:
                 Y = jnp.broadcast_to(Y[None, :], (rho_L.shape[0], Y.shape[0]))
+        Tw_arr = jnp.full_like(rho_L, Tw)
+        Tvw_arr = jnp.full_like(rho_L, Tvw)
         return equation_manager_utils.compute_U_from_primitives(
             Y_s=Y,
             rho=rho_L,
             u=u_g,
             v=v_g,
-            T_tr=jnp.full_like(rho_L, Tw),
-            T_V=jnp.full_like(rho_L, Tvw),
+            T_tr=2.0 * Tw_arr - T_L,
+            T_V=2.0 * Tvw_arr - Tv_L,
             equation_manager=equation_manager,
         )
 

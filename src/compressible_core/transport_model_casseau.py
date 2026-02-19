@@ -9,7 +9,7 @@ from __future__ import annotations
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from compressible_core import constants
+from compressible_core import constants, thermodynamic_relations
 from compressible_core import transport_model_casseau_utils as _transport_model_casseau_utils
 from compressible_core.transport_casseau_types import CasseauTransportTable
 
@@ -50,17 +50,6 @@ def compute_species_viscosity_powerlaw(
     return mu
 
 
-def split_cv_tr(
-    molar_masses: Float[Array, " n_species"],
-    is_monoatomic: Float[Array, " n_species"],
-) -> tuple[Float[Array, " n_species"], Float[Array, " n_species"]]:
-    """Return translational and rotational Cv for each species."""
-    R_s = constants.R_universal / molar_masses
-    cv_t = 1.5 * R_s
-    cv_r = jnp.where(is_monoatomic, 0.0, 1.0 * R_s)
-    return cv_t, cv_r
-
-
 def compute_species_kappa_eucken(
     T: Float[Array, " n_cells"],
     T_v: Float[Array, " n_cells"],
@@ -71,7 +60,8 @@ def compute_species_kappa_eucken(
 ) -> tuple[Float[Array, "n_species n_cells"], Float[Array, "n_species n_cells"], Float[Array, "n_species n_cells"]]:
     """Compute species thermal conductivities using Eucken relations."""
     del T, T_v
-    cv_t, cv_r = split_cv_tr(molar_masses, is_monoatomic)
+    cv_t = thermodynamic_relations.compute_cv_t(molar_masses)
+    cv_r = thermodynamic_relations.compute_cv_r(molar_masses, is_monoatomic)
 
     eta_t = 2.5 * mu_s * cv_t[:, None]
     eta_r = mu_s * cv_r[:, None]

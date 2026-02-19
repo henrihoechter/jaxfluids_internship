@@ -4,6 +4,7 @@ Implements the main solver loop with operator splitting for source terms.
 """
 
 import warnings
+import numpy as np
 from jaxtyping import Array, Float
 import jax
 import jax.numpy as jnp
@@ -194,6 +195,15 @@ def run_scan(
         t_history0,
     )
 
+    def _raise_if_nan(U_concrete, t_concrete, step_idx_concrete):
+        if jnp.any(jnp.isnan(U_concrete)):
+            path = f"nan_dump_step{int(step_idx_concrete)}.npz"
+            np.savez(path, U=np.array(U_concrete), t=np.array(t_concrete))
+            print(path)
+            raise RuntimeError(
+                f"NaN detected in state U at step {int(step_idx_concrete)}, t={float(t_concrete):.6e}"
+            )
+
     def body(carry, xs):
         dt_step, step_idx = xs
         U, t, snap_i, U_hist, t_hist = carry
@@ -201,6 +211,8 @@ def run_scan(
         # Advance
         U = advance_one_step(U, equation_manager, dt_step)
         t = t + dt_step
+
+        jax.debug.callback(_raise_if_nan, U, t, step_idx, ordered=True)
 
         # Save every save_interval steps
         save = (step_idx % save_interval) == 0  # step_idx is 1..n_steps

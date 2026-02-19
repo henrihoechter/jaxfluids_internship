@@ -299,6 +299,15 @@ def run_scan(
         t_history0,
     )
 
+    def _raise_if_nan(U_concrete, t_concrete, step_idx_concrete):
+        if jnp.any(jnp.isnan(U_concrete)):
+            path = f"nan_dump_step{int(step_idx_concrete)}.npz"
+            np.savez(path, U=np.array(U_concrete), t=np.array(t_concrete))
+            print(path)
+            raise RuntimeError(
+                f"NaN detected in state U at step {int(step_idx_concrete)}, t={float(t_concrete):.6e}"
+            )
+
     def body(carry, step_idx):
         U, t, snap_i, U_hist, t_hist = carry
         if equation_manager.numerics_config.dt_mode == "cfl":
@@ -308,6 +317,8 @@ def run_scan(
 
         U = advance_one_step(U, mesh, equation_manager, dt)
         t = t + dt
+
+        jax.debug.callback(_raise_if_nan, U, t, step_idx, ordered=True)
 
         save = (step_idx % save_interval) == 0
 

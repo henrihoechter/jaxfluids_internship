@@ -122,6 +122,23 @@ def compute_cv_trans_rot(
     return cv_tr
 
 
+def compute_cv_t(
+    molar_masses: Float[Array, " n_species"],
+) -> Float[Array, " n_species"]:
+    """Compute translational Cv for each species."""
+    R_s = constants.R_universal / molar_masses
+    return 1.5 * R_s
+
+
+def compute_cv_r(
+    molar_masses: Float[Array, " n_species"],
+    is_monoatomic: Float[Array, " n_species"],
+) -> Float[Array, " n_species"]:
+    """Compute rotational Cv for each species."""
+    R_s = constants.R_universal / molar_masses
+    return jnp.where(is_monoatomic, 0.0, 1.0 * R_s)
+
+
 def compute_cv_vib_electronic(
     T_V: Float[Array, " N"],
     T_limit_low: Float[Array, "n_species n_ranges"],
