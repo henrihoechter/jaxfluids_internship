@@ -196,9 +196,14 @@ def _ghost_wall(
     T_ghost = 2.0 * Tw - T_L
     Tv_ghost = 2.0 * Tvw - Tv_L
 
+    # Pressure-matching density: keep p_ghost = p_L so the Riemann solver sees no
+    # spurious pressure jump at the wall (p = rho*R*T for ideal gas).
+    # => rho_ghost = rho_L * T_L / T_ghost
+    rho_ghost = rho_L * T_L / jnp.clip(T_ghost, 1.0, None)
+
     return equation_manager_utils.compute_U_from_primitives(
         Y_s=Y,
-        rho=rho_L,
+        rho=rho_ghost,
         u=u_g,
         v=v_g,
         T_tr=T_ghost,

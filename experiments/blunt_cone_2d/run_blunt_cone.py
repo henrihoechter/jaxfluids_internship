@@ -97,7 +97,7 @@ def main() -> None:
     numerics_config = numerics_types.NumericsConfig2D(
         dt=args.dt,
         cfl=args.cfl,
-        dt_mode=args.dt_mode,
+        dt_mode=args.dt_mode,   
         integrator_scheme="rk2",
         spatial_scheme="first_order",
         flux_scheme="hllc",

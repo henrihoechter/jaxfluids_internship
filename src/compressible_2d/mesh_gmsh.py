@@ -199,6 +199,148 @@ def _read_gmsh_v2(lines: list[str]) -> Mesh2D:
     return Mesh2D.from_cells(nodes, cells, boundary_edges)
 
 
+def read_gmsh_v2_wedge_plane(
+    path: str | Path,
+    wedge_plane_tag: int = 4,
+    remap_tags: dict[int, int] | None = None,
+    axis_tag: int | None = None,
+    axis_tol: float = 1e-10,
+) -> "Mesh2D":
+    """Extract a 2D cross-section from a 3D thin-wedge Gmsh v2 mesh.
+
+    A thin-wedge mesh is a 3D mesh with one layer of hex/prism cells extruded
+    from the 2D r-z cross-section by a small circumferential angle.  The wedge
+    planes (wedge1, wedge2) are quad surface elements that exactly match the
+    desired 2D mesh.  Other boundary surfaces (inlet, outlet, wall) share edges
+    with the wedge plane quads, providing the boundary tags.
+
+    Because gmsh files often store only a single axis line element even when
+    many cell edges lie on the axis (y = 0), an optional geometric fallback is
+    provided via axis_tag: any cell edge where both endpoint y-coordinates are
+    within axis_tol of zero gets that tag.
+
+    Parameters
+    ----------
+    path : str or Path
+        Path to the .msh file (gmsh v2 format).
+    wedge_plane_tag : int
+        Physical group tag of the wedge plane to use as 2D cells (default 4).
+    remap_tags : dict[int, int] or None
+        Optional remapping applied to all boundary tags after extraction.
+        For example {7: 4} renames the gmsh axis tag 7 to 4.
+    axis_tag : int or None
+        If given, every cell edge where both nodes have y <= axis_tol is
+        assigned this tag (after remap_tags is applied).  Use this when the
+        gmsh file has too few axis line elements to cover all axis edges.
+    axis_tol : float
+        Tolerance on the y coordinate for axis-edge detection (default 1e-10).
+    """
+    path = Path(path)
+    lines = path.read_text().splitlines()
+
+    if "$MeshFormat" not in lines:
+        raise ValueError("Invalid .msh: missing $MeshFormat")
+    idx = lines.index("$MeshFormat")
+    version = lines[idx + 1].split()[0]
+    if not version.startswith("2."):
+        raise ValueError(
+            f"read_gmsh_v2_wedge_plane only supports gmsh v2, got v{version}"
+        )
+
+    # Read nodes (3D coordinates; project to 2D by dropping z).
+    node_start = lines.index("$Nodes") + 1
+    n_nodes = int(lines[node_start])
+    nodes = np.zeros((n_nodes, 2))
+    node_y = np.zeros(n_nodes)
+    for i in range(n_nodes):
+        parts = lines[node_start + 1 + i].split()
+        _nid, x, y, _z = parts[:4]
+        nodes[i] = [float(x), float(y)]
+        node_y[i] = float(y)
+
+    # Read elements grouped by physical tag.
+    elem_start = lines.index("$Elements") + 1
+    n_elem = int(lines[elem_start])
+
+    by_tag: dict[int, list[tuple[int, list[int]]]] = {}
+    for i in range(n_elem):
+        parts = lines[elem_start + 1 + i].split()
+        elem_type = int(parts[1])
+        num_tags = int(parts[2])
+        tags = [int(t) for t in parts[3 : 3 + num_tags]]
+        node_ids = [int(n) - 1 for n in parts[3 + num_tags :]]
+        physical_tag = tags[0] if tags else -1
+        by_tag.setdefault(physical_tag, []).append((elem_type, node_ids))
+
+    # Wedge plane cells.
+    if wedge_plane_tag not in by_tag:
+        raise ValueError(
+            f"No elements with physical tag {wedge_plane_tag} in {path.name}"
+        )
+    cells = [
+        np.array(nids, dtype=int)
+        for (et, nids) in by_tag[wedge_plane_tag]
+        if et in (2, 3)
+    ]
+    if not cells:
+        raise ValueError(
+            f"Physical tag {wedge_plane_tag} has no tri/quad elements"
+        )
+
+    # Build edge -> tag from all non-wedge surface and line elements.
+    # For surface quads/tris: their edges that coincide with wedge-plane edges
+    # carry the boundary tag.  For line elements: the element itself is an edge.
+    edge_tag_map: dict[tuple[int, int], int] = {}
+    for tag, elem_list in by_tag.items():
+        if tag == wedge_plane_tag:
+            continue
+        for (et, nids) in elem_list:
+            if et == 1 and len(nids) == 2:
+                key = (min(nids[0], nids[1]), max(nids[0], nids[1]))
+                edge_tag_map[key] = tag
+            elif et in (2, 3):
+                n = len(nids)
+                for k in range(n):
+                    n1, n2 = nids[k], nids[(k + 1) % n]
+                    key = (min(n1, n2), max(n1, n2))
+                    edge_tag_map[key] = tag
+
+    # Apply tag remapping.
+    if remap_tags:
+        edge_tag_map = {k: remap_tags.get(v, v) for k, v in edge_tag_map.items()}
+
+    boundary_edges = [(n1, n2, tag) for (n1, n2), tag in edge_tag_map.items()]
+
+    mesh = Mesh2D.from_cells(nodes, cells, boundary_edges)
+
+    # Geometric axis fallback: any face where both endpoint y-coords <= axis_tol
+    # gets overwritten with axis_tag.
+    if axis_tag is not None:
+        tags_arr = mesh.boundary_tags.copy()
+        fn = mesh.face_nodes
+        for fi in range(len(tags_arr)):
+            n1, n2 = fn[fi, 0], fn[fi, 1]
+            if node_y[n1] <= axis_tol and node_y[n2] <= axis_tol:
+                tags_arr[fi] = axis_tag
+        mesh = Mesh2D(
+            nodes=mesh.nodes,
+            cells=mesh.cells,
+            cell_centroids=mesh.cell_centroids,
+            cell_areas=mesh.cell_areas,
+            face_nodes=mesh.face_nodes,
+            face_left=mesh.face_left,
+            face_right=mesh.face_right,
+            face_normals=mesh.face_normals,
+            face_areas=mesh.face_areas,
+            face_centroids=mesh.face_centroids,
+            boundary_tags=tags_arr,
+            cell_r=mesh.cell_r,
+            face_r=mesh.face_r,
+        )
+
+    return mesh
+
+
 def _read_gmsh_v4(lines: list[str]) -> Mesh2D:
     # Nodes block
     node_start = lines.index("$Nodes") + 1

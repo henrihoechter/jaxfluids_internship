@@ -269,6 +269,13 @@ def run_scan(
 ]:
     """Run simulation using jax.lax.scan.
 
+    Args:
+        U_init: Initial condition [n_cells, n_variables]
+        mesh: Mesh data
+        equation_manager: Contains all configuration
+        t_final: Final simulation time
+        save_interval: Save solution every N steps
+        
     Note: boundary conditions must be converted to array form for JIT safety.
     """
     if equation_manager.boundary_arrays is None:
@@ -277,10 +284,8 @@ def run_scan(
             "Build it with compressible_2d.build_boundary_arrays(...)."
         )
 
-    if equation_manager.numerics_config.dt_mode == "cfl":
-        dt0 = compute_cfl_dt(U_init, mesh, equation_manager)
-    else:
-        dt0 = equation_manager.numerics_config.dt
+    
+    dt0 = equation_manager.numerics_config.dt
 
     n_steps = int(t_final / dt0)
     n_snapshots = int(n_steps // save_interval) + 1
