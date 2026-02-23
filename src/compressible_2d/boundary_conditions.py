@@ -11,6 +11,7 @@ from .boundary_conditions_types import (
     BC_INFLOW,
     BC_WALL,
     BC_WALL_SLIP,
+    BC_WALL_EULER,
 )
 from .equation_manager_types import BoundaryConditionArrays2D, EquationManager2D
 from .mesh_gmsh import Mesh2D
@@ -87,7 +88,9 @@ def compute_slip_wall_ghost(
     cv_v = thermodynamic_relations.compute_cv_ve(Tv_L, equation_manager.species)
     cv_v_mix = jnp.sum(Y_L * cv_v.T, axis=1)
     pr_v = mu * cv_v_mix / jnp.clip(eta_v, 1e-30, None)
-    A_Tv = jump_coeff * (2.0 * gamma / (gamma + 1.0)) * (Kn / jnp.clip(pr_v, 1e-30, None))
+    A_Tv = (
+        jump_coeff * (2.0 * gamma / (gamma + 1.0)) * (Kn / jnp.clip(pr_v, 1e-30, None))
+    )
 
     Tv_gs = (2.0 * Tvw + (A_Tv - 1.0) * Tv_L) / jnp.clip(1.0 + A_Tv, 1e-6, None)
     Tv_gs = jnp.clip(Tv_gs, 1.0, None)
@@ -156,6 +159,34 @@ def _ghost_axisymmetric(
     u_g = u_n_g * n_x + u_t_g * t_x
     v_g = u_n_g * n_y + u_t_g * t_y
 
+    return equation_manager_utils.compute_U_from_primitives(
+        Y_s=Y_L,
+        rho=rho_L,
+        u=u_g,
+        v=v_g,
+        T_tr=T_L,
+        T_V=Tv_L,
+        equation_manager=equation_manager,
+    )
+
+
+def _ghost_wall_euler(
+    U_L: Float[Array, "n_faces n_variables"],
+    n_hat: Float[Array, "n_faces 2"],
+    equation_manager: EquationManager2D,
+) -> Float[Array, "n_faces n_variables"]:
+    """Euler (inviscid) slip wall: reflect only the normal velocity component."""
+    Y_L, rho_L, u_L, v_L, T_L, Tv_L, _ = (
+        equation_manager_utils.extract_primitives_from_U(U_L, equation_manager)
+    )
+    n_x = n_hat[:, 0]
+    n_y = n_hat[:, 1]
+    t_x = -n_y
+    t_y = n_x
+    u_n = u_L * n_x + v_L * n_y
+    u_t = u_L * t_x + v_L * t_y
+    u_g = -u_n * n_x + u_t * t_x
+    v_g = -u_n * n_y + u_t * t_y
     return equation_manager_utils.compute_U_from_primitives(
         Y_s=Y_L,
         rho=rho_L,
@@ -273,16 +304,19 @@ def compute_face_states(
     U_R_axis = _ghost_axisymmetric(U_L, n_hat, equation_manager)
     U_R_wall = _ghost_wall(U_L, bc, bc_id, equation_manager)
     U_R_wall_slip = _ghost_wall_slip(U_L, bc, bc_id, n_hat, equation_manager)
+    U_R_wall_euler = _ghost_wall_euler(U_L, n_hat, equation_manager)
 
     mask_inflow = bc_id == BC_INFLOW
     mask_axis = bc_id == BC_AXISYMMETRIC
     mask_wall = bc_id == BC_WALL
     mask_wall_slip = bc_id == BC_WALL_SLIP
+    mask_wall_euler = bc_id == BC_WALL_EULER
 
     U_R = jnp.where(mask_inflow[:, None], U_R_inflow, U_R)
     U_R = jnp.where(mask_axis[:, None], U_R_axis, U_R)
     U_R = jnp.where(mask_wall[:, None], U_R_wall, U_R)
     U_R = jnp.where(mask_wall_slip[:, None], U_R_wall_slip, U_R)
+    U_R = jnp.where(mask_wall_euler[:, None], U_R_wall_euler, U_R)
     return U_L, U_R
 
 
@@ -399,6 +433,22 @@ def compute_ghost_state(
             wall_dist=jnp.full_like(rho_L, wall_dist),
             sigma_t=jnp.full_like(rho_L, sigma_t),
             sigma_v=jnp.full_like(rho_L, sigma_v),
+        )
+
+    if bc_type == "wall_euler":
+        # Euler (inviscid) slip wall: reflect only the normal velocity, keep tangential.
+        u_n_g = -u_n
+        u_t_g = u_t
+        u_g = u_n_g * n_x + u_t_g * t_x
+        v_g = u_n_g * n_y + u_t_g * t_y
+        return equation_manager_utils.compute_U_from_primitives(
+            Y_s=Y_L,
+            rho=rho_L,
+            u=u_g,
+            v=v_g,
+            T_tr=T_L,
+            T_V=Tv_L,
+            equation_manager=equation_manager,
         )
 
     raise ValueError(f"Unknown boundary condition type: {bc_type}")

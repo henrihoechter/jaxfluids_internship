@@ -1,4 +1,4 @@
-"""Run a 2D axisymmetric blunt-cone case (Casseau-like defaults)."""
+"""Run a 2D blunt-cone case with subsonic, thermally relaxed conditions (Ma ~ 0.3, sea-level N2)."""
 
 from __future__ import annotations
 
@@ -43,12 +43,14 @@ def load_species_table(species_names: tuple[str, ...]) -> chemistry_utils.Specie
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run blunt-cone 2D axisymmetric case")
+    parser = argparse.ArgumentParser(
+        description="Run blunt-cone 2D subsonic relaxed case"
+    )
     parser.add_argument("--mesh", required=True, help="Path to Gmsh .msh file")
-    parser.add_argument("--t-final", type=float, default=5e-5)
+    parser.add_argument("--t-final", type=float, default=1e-3)
     parser.add_argument("--save-interval", type=int, default=50)
     parser.add_argument("--dt-mode", choices=["fixed", "cfl"], default="fixed")
-    parser.add_argument("--dt", type=float, default=1e-9)
+    parser.add_argument("--dt", type=float, default=1e-7)
     parser.add_argument("--cfl", type=float, default=0.4)
     parser.add_argument("--transport", choices=["gnoffo", "casseau"], default="casseau")
     parser.add_argument("--reactions", default=None, help="Path to reactions JSON")
@@ -90,12 +92,14 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    # Casseau Mach 11.3 blunted cone defaults (non-reacting N2)
-    U_inf = 2764.5
-    p_inf = 21.9139
-    rho_inf = 5.113e-4
-    T_inf = 144.4
-    Tw = 297.2
+    # Subsonic relaxed defaults: Ma ~ 0.3, sea-level N2
+    # R_N2 = 8314.46 / 28.014 = 296.8 J/(kg*K)
+    # a = sqrt(1.4 * 296.8 * 300) = 352.6 m/s  =>  U_inf = 0.3 * a = 105.8 m/s
+    T_inf = 300.0
+    p_inf = 101325.0
+    rho_inf = p_inf / (296.8 * T_inf)  # ~1.138 kg/m^3
+    U_inf = 705.8  # Ma ~ 0.3
+    Tw = T_inf  # isothermal wall at freestream temperature
 
     species_names = ("N2",)
     species = load_species_table(species_names)
@@ -143,7 +147,7 @@ def main() -> None:
                 "Y": [1.0],
             },
             args.tag_outflow: {"type": "outflow"},
-            args.tag_wall: {"type": "wall_euler"},
+            args.tag_wall: {"type": "wall_euler", "Tw": Tw},
             args.tag_axis: {"type": "axisymmetric"},
         }
     )
@@ -182,7 +186,6 @@ def main() -> None:
         )
     else:
         print("  All boundary faces are tagged.")
-    # Check expected tags are present
     expected_tags = {args.tag_inflow, args.tag_outflow, args.tag_wall, args.tag_axis}
     missing = expected_tags - set(tag_counts.keys())
     if missing:
@@ -195,7 +198,6 @@ def main() -> None:
 
         _, ax = plt.subplots(figsize=(10, 8))
 
-        # Draw interior cell edges in light grey
         cell_edges = []
         for cell in mesh.cells:
             pts = mesh.nodes[cell]
@@ -205,7 +207,6 @@ def main() -> None:
             mc.LineCollection(cell_edges, colors="lightgrey", linewidths=0.3)
         )
 
-        # Draw boundary faces colored by tag
         unique_tags = sorted(
             set(int(t) for t in mesh.boundary_tags[mesh.face_right == -1])
         )
@@ -252,7 +253,7 @@ def main() -> None:
         casseau_transport=casseau_transport,
     )
 
-    # Initialize freestream everywhere
+    # Initialize freestream everywhere (thermally relaxed: Tv = T)
     n_cells = mesh.cell_areas.shape[0]
     Y = jnp.ones((n_cells, len(species_names)))
     rho = jnp.full((n_cells,), rho_inf)
@@ -272,11 +273,6 @@ def main() -> None:
     )
 
     if args.debug_nan:
-        # Run one step in eager mode with NaN checking enabled.
-        # jax_debug_nans raises FloatingPointError at the exact XLA op that
-        # first produces a NaN, together with a Python stack trace.
-        # jax.disable_jit() ensures the step executes eagerly so the stack trace
-        # points to the actual Python source line instead of a compiled kernel.
         print("NaN debug: running one step with jax_debug_nans=True ...")
         jax.config.update("jax_debug_nans", True)
         with jax.disable_jit():
@@ -298,7 +294,7 @@ def main() -> None:
 
     out_dir = Path("experiments/blunt_cone_2d")
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "solution.npz"
+    out_path = out_dir / "solution_subsonic.npz"
     np.savez(out_path, U=U_hist, t=t_hist)
     print(f"Saved solution to {out_path}")
 

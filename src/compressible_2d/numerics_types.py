@@ -1,7 +1,9 @@
 from dataclasses import dataclass, field
 from typing import Literal
+import jax
 
 
+@jax.tree_util.register_dataclass
 @dataclass(frozen=True, slots=True)
 class ClippingConfig2D:
     """Clipping limits for primitive and conserved variables."""
@@ -35,6 +37,7 @@ class ClippingConfig2D:
     D_s_max: float = 1e2
 
 
+@jax.tree_util.register_dataclass
 @dataclass(frozen=True, slots=True)
 class NumericsConfig2D:
     dt: float | None = field(metadata=dict(static=True))

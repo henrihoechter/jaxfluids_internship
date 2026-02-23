@@ -1,4 +1,5 @@
 import dataclasses
+import jax
 
 from jaxtyping import Array, Bool, Float, Int
 
@@ -21,6 +22,7 @@ class BoundaryConditionConfig2D:
     tag_to_bc: dict[int, dict]
 
 
+@jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, slots=True)
 class BoundaryConditionArrays2D:
     bc_id: Int[Array, "n_faces"]
@@ -43,6 +45,7 @@ class BoundaryConditionArrays2D:
     wall_dist: Float[Array, "n_faces"]
 
 
+@jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, slots=True)
 class EquationManager2D:
     species: chemistry_types.SpeciesTable

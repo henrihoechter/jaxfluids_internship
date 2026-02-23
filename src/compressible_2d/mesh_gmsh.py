@@ -4,13 +4,16 @@ import dataclasses
 from pathlib import Path
 from typing import Iterable
 
+import jax
 import numpy as np
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Mesh2D:
     nodes: np.ndarray  # (n_nodes, 2)
-    cells: list[np.ndarray]  # list of node index arrays
+    cells: list[
+        np.ndarray
+    ]  # list of node index arrays (construction-only; excluded from JAX pytree leaves)
     cell_centroids: np.ndarray  # (n_cells, 2)
     cell_areas: np.ndarray  # (n_cells,)
     face_nodes: np.ndarray  # (n_faces, 2)
@@ -139,6 +142,65 @@ class Mesh2D:
             cell_r=cell_r,
             face_r=face_r,
         )
+
+
+# Register Mesh2D as a JAX pytree.
+# cells (list[np.ndarray]) is excluded from dynamic leaves: it is unhashable and
+# unused in solver kernels.  All solver arrays (connectivity, normals, areas,
+# radii) become abstract ShapedArray leaves so XLA never constant-folds them.
+# Reconstructed Mesh2D objects (inside JIT) carry cells=[] which is safe
+# because no solver code ever accesses that field.
+def _mesh2d_flatten(mesh):
+    leaves = [
+        mesh.nodes,
+        mesh.cell_centroids,
+        mesh.cell_areas,
+        mesh.face_nodes,
+        mesh.face_left,
+        mesh.face_right,
+        mesh.face_normals,
+        mesh.face_areas,
+        mesh.face_centroids,
+        mesh.boundary_tags,
+        mesh.cell_r,
+        mesh.face_r,
+    ]
+    return leaves, None  # cells not included; aux_data=None is hashable
+
+
+def _mesh2d_unflatten(aux_data, leaves):
+    (
+        nodes,
+        cell_centroids,
+        cell_areas,
+        face_nodes,
+        face_left,
+        face_right,
+        face_normals,
+        face_areas,
+        face_centroids,
+        boundary_tags,
+        cell_r,
+        face_r,
+    ) = leaves
+    return Mesh2D(
+        nodes=nodes,
+        cells=[],  # not needed by solver kernels
+        cell_centroids=cell_centroids,
+        cell_areas=cell_areas,
+        face_nodes=face_nodes,
+        face_left=face_left,
+        face_right=face_right,
+        face_normals=face_normals,
+        face_areas=face_areas,
+        face_centroids=face_centroids,
+        boundary_tags=boundary_tags,
+        cell_r=cell_r,
+        face_r=face_r,
+    )
+
+
+jax.tree_util.register_pytree_node(Mesh2D, _mesh2d_flatten, _mesh2d_unflatten)
 
 
 def read_gmsh(path: str | Path) -> Mesh2D:
@@ -283,9 +345,7 @@ def read_gmsh_v2_wedge_plane(
         if et in (2, 3)
     ]
     if not cells:
-        raise ValueError(
-            f"Physical tag {wedge_plane_tag} has no tri/quad elements"
-        )
+        raise ValueError(f"Physical tag {wedge_plane_tag} has no tri/quad elements")
 
     # Build edge -> tag from all non-wedge surface and line elements.
     # For surface quads/tris: their edges that coincide with wedge-plane edges
@@ -294,7 +354,7 @@ def read_gmsh_v2_wedge_plane(
     for tag, elem_list in by_tag.items():
         if tag == wedge_plane_tag:
             continue
-        for (et, nids) in elem_list:
+        for et, nids in elem_list:
             if et == 1 and len(nids) == 2:
                 key = (min(nids[0], nids[1]), max(nids[0], nids[1]))
                 edge_tag_map[key] = tag

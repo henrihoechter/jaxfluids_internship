@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import math
 from typing import Tuple
 
@@ -31,13 +32,6 @@ def _face_weights(mesh: Mesh2D, axisymmetric: bool) -> tuple[jnp.ndarray, jnp.nd
         face_w = face_areas
         cell_w = cell_areas
     return face_w, cell_w
-
-
-
-
-from .equation_manager_utils import build_equation_manager
-
-
 
 
 @jax.named_call
@@ -210,6 +204,8 @@ def run(
     U = U_init
     t = 0.0
 
+    _step = jax.jit(advance_one_step)
+
     history_device = history_device.lower()
     if history_device in ("cpu", "host"):
         store_on_cpu = True
@@ -244,7 +240,7 @@ def run(
     for step in range(1, n_steps + 1):
         if equation_manager.numerics_config.dt_mode == "cfl":
             dt = compute_cfl_dt(U, mesh, equation_manager)
-        U = advance_one_step(U, mesh, equation_manager, dt)
+        U = _step(U, mesh, equation_manager, dt)
         t += dt
         if step % save_interval == 0 and snapshot_idx < n_snapshots:
             if store_on_cpu:
@@ -258,6 +254,7 @@ def run(
     return U_history, t_history
 
 
+@functools.partial(jax.jit, static_argnums=(3, 4))
 def run_scan(
     U_init: Float[Array, "n_cells n_variables"],
     mesh: Mesh2D,
@@ -267,26 +264,24 @@ def run_scan(
 ) -> Tuple[
     Float[Array, "n_snapshots n_cells n_variables"], Float[Array, "n_snapshots"]
 ]:
-    """Run simulation using jax.lax.scan.
+    """Run simulation using jax.lax.scan with JIT compilation.
+
+    Only supports dt_mode='fixed'. For CFL-adaptive stepping use run().
 
     Args:
         U_init: Initial condition [n_cells, n_variables]
-        mesh: Mesh data
-        equation_manager: Contains all configuration
-        t_final: Final simulation time
-        save_interval: Save solution every N steps
-        
-    Note: boundary conditions must be converted to array form for JIT safety.
+        mesh: Mesh data (pytree)
+        equation_manager: Contains all configuration (pytree)
+        t_final: Final simulation time (static — determines n_steps)
+        save_interval: Save solution every N steps (static — determines n_snapshots)
     """
-    if equation_manager.boundary_arrays is None:
+    if equation_manager.numerics_config.dt_mode != "fixed":
         raise ValueError(
-            "boundary_arrays is required for JIT-safe execution. "
-            "Build it with compressible_2d.build_boundary_arrays(...)."
+            "run_scan only supports dt_mode='fixed'. "
+            "Use run() for CFL-adaptive stepping."
         )
 
-    
     dt0 = equation_manager.numerics_config.dt
-
     n_steps = int(t_final / dt0)
     n_snapshots = int(n_steps // save_interval) + 1
 
@@ -304,26 +299,25 @@ def run_scan(
         t_history0,
     )
 
-    def _raise_if_nan(U_concrete, t_concrete, step_idx_concrete):
+    def _dump_if_nan(U_concrete, t_concrete, step_idx_concrete):
         if jnp.any(jnp.isnan(U_concrete)):
             path = f"nan_dump_step{int(step_idx_concrete)}.npz"
             np.savez(path, U=np.array(U_concrete), t=np.array(t_concrete))
-            print(path)
             raise RuntimeError(
-                f"NaN detected in state U at step {int(step_idx_concrete)}, t={float(t_concrete):.6e}"
+                f"NaN detected at step {int(step_idx_concrete)}, "
+                f"t={float(t_concrete):.6e}. State dumped to {path}"
             )
 
     def body(carry, step_idx):
         U, t, snap_i, U_hist, t_hist = carry
-        if equation_manager.numerics_config.dt_mode == "cfl":
-            dt = compute_cfl_dt(U, mesh, equation_manager)
-        else:
-            dt = equation_manager.numerics_config.dt
 
+        dt = equation_manager.numerics_config.dt
         U = advance_one_step(U, mesh, equation_manager, dt)
         t = t + dt
 
-        jax.debug.callback(_raise_if_nan, U, t, step_idx, ordered=True)
+        # ordered=False: callback fires asynchronously so it does not serialize
+        # XLA execution. NaN dumps are still produced on the host side.
+        jax.debug.callback(_dump_if_nan, U, t, step_idx, ordered=False)
 
         save = (step_idx % save_interval) == 0
 

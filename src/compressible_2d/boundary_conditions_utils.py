@@ -14,6 +14,7 @@ from .boundary_conditions_types import (
     BC_AXISYMMETRIC,
     BC_WALL,
     BC_WALL_SLIP,
+    BC_WALL_EULER,
 )
 
 
@@ -89,6 +90,8 @@ def _build_boundary_arrays(
                     raise ValueError("Y_wall must have shape (n_species,)")
                 wall_Y[mask, :] = Yw[None, :]
                 wall_has_Y[mask] = True
+        elif bc_type == "wall_euler":
+            bc_id[mask] = BC_WALL_EULER
         elif bc_type == "wall_slip":
             bc_id[mask] = BC_WALL_SLIP
             if "Tw" in bc:
