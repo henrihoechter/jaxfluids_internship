@@ -237,7 +237,7 @@ def main() -> None:
         plt.show()
         return
 
-    eq_manager = equation_manager.build_equation_manager(
+    eq_manager = equation_manager_utils.build_equation_manager(
         mesh,
         species=species,
         collision_integrals=collision_integrals,

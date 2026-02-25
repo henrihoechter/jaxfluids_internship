@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd /workspace
 
 # Ensure Python exists (comes from system Python 3.11)
 python3 --version >/dev/null 2>&1 || python --version

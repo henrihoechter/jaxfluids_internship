@@ -87,6 +87,17 @@ def main() -> None:
             "(default: 7)."
         ),
     )
+    parser.add_argument(
+        "--species",
+        default="N2",
+        help="Comma-separated species names, e.g. 'N2' or 'N2,N' (default: N2).",
+    )
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="Output .npz filename (without directory). Saved under experiments/blunt_cone_2d/. "
+        "Defaults to 'solution.npz'.",
+    )
 
     args = parser.parse_args()
 
@@ -97,7 +108,7 @@ def main() -> None:
     T_inf = 144.4
     Tw = 297.2
 
-    species_names = ("N2",)
+    species_names = tuple(s.strip() for s in args.species.split(","))
     species = load_species_table(species_names)
 
     reactions = None
@@ -125,7 +136,7 @@ def main() -> None:
         cfl=args.cfl,
         dt_mode=args.dt_mode,
         integrator_scheme="rk2",
-        spatial_scheme="first_order",
+        spatial_scheme="muscl",
         flux_scheme="hllc",
         axisymmetric=True,
         clipping=numerics_types.ClippingConfig2D(),
@@ -140,10 +151,10 @@ def main() -> None:
                 "v": 0.0,
                 "T": T_inf,
                 "Tv": T_inf,
-                "Y": [1.0],
+                "Y": [1.0 if s == "N2" else 0.0 for s in species_names],
             },
             args.tag_outflow: {"type": "outflow"},
-            args.tag_wall: {"type": "wall_euler"},
+            args.tag_wall: {"type": "wall_slip", "Tw": Tw, "Tvw": Tw},
             args.tag_axis: {"type": "axisymmetric"},
         }
     )
@@ -236,7 +247,7 @@ def main() -> None:
         plt.show()
         return
 
-    eq_manager = equation_manager.build_equation_manager(
+    eq_manager = equation_manager_utils.build_equation_manager(
         mesh,
         species=species,
         collision_integrals=collision_integrals,
@@ -252,9 +263,10 @@ def main() -> None:
         casseau_transport=casseau_transport,
     )
 
-    # Initialize freestream everywhere
+    # Initialize freestream everywhere (pure N2, all other species = 0)
     n_cells = mesh.cell_areas.shape[0]
-    Y = jnp.ones((n_cells, len(species_names)))
+    Y_freestream = jnp.array([1.0 if s == "N2" else 0.0 for s in species_names])
+    Y = jnp.broadcast_to(Y_freestream[None, :], (n_cells, len(species_names)))
     rho = jnp.full((n_cells,), rho_inf)
     u = jnp.full((n_cells,), U_inf)
     v = jnp.zeros((n_cells,))
@@ -298,7 +310,10 @@ def main() -> None:
 
     out_dir = Path("experiments/blunt_cone_2d")
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "solution.npz"
+    out_name = args.output if args.output else "solution.npz"
+    if not out_name.endswith(".npz"):
+        out_name += ".npz"
+    out_path = out_dir / out_name
     np.savez(out_path, U=U_hist, t=t_hist)
     print(f"Saved solution to {out_path}")
 
