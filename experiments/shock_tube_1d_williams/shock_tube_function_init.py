@@ -20,7 +20,13 @@ import jax
 import jax.numpy as jnp
 
 from compressible_core import chemistry_utils, constants, energy_models
-from compressible_1d import equation_manager, equation_manager_types, equation_manager_utils, numerics_types, solver
+from compressible_1d import (
+    equation_manager,
+    equation_manager_types,
+    equation_manager_utils,
+    numerics_types,
+    solver,
+)
 
 try:
     import plotly.graph_objects as go
@@ -253,11 +259,15 @@ def main():
     if Y_L.shape[0] != len(species_names) or Y_R.shape[0] != len(species_names):
         raise ValueError("Y_L and Y_R must match species_names length.")
 
-    p_fn = None if (T_L is not None) else make_piecewise_fn(
-        x0, p_L, p_R, width=transition_width
+    p_fn = (
+        None
+        if (T_L is not None)
+        else make_piecewise_fn(x0, p_L, p_R, width=transition_width)
     )
-    T_fn = None if p_fn is not None else make_piecewise_fn(
-        x0, T_L, T_R, width=transition_width
+    T_fn = (
+        None
+        if p_fn is not None
+        else make_piecewise_fn(x0, T_L, T_R, width=transition_width)
     )
     Tv_fn = None
     if Tv_L is not None or Tv_R is not None:

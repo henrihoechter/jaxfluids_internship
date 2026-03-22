@@ -48,6 +48,11 @@ class NumericsConfig:
         metadata=dict(static=True)
     )
     spatial_scheme: Literal["first_order", "muscl"] = field(metadata=dict(static=True))
-    flux_scheme: Literal["lax_friedrichs", "hllc"] = field(metadata=dict(static=True))
+    flux_scheme: Literal["lax_friedrichs", "hllc", "exact_riemann"] = field(
+        metadata=dict(static=True)
+    )
     n_halo_cells: int = field(metadata=dict(static=True))  # per side
+    slope_limiter: Literal["minmod", "mc"] = field(
+        default="mc", metadata=dict(static=True)
+    )
     clipping: ClippingConfig = field(default_factory=ClippingConfig)

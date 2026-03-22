@@ -69,7 +69,6 @@ def compute_source_terms(
 
     # Term 6: Vibrational-translational relaxation
     Q_TV = compute_vibrational_relaxation(U, equation_manager, primitives=primitives)
-    # Q_TV = jnp.zeros_like(Q_TV)
 
     Q_VV = jnp.zeros_like(Q_TV)  # TODO: implement vibrational-vibrational relaxation
     Q_eT = jnp.zeros_like(Q_TV)  # TODO: implement electron-translational relaxation
@@ -400,7 +399,8 @@ def compute_relaxation_time_2_casseau(
     tau_mw_ms = jnp.exp(exp_arg) / jnp.clip(p_atm, 1e-300, None)[:, None, None]
 
     # --- Park correction, computed pairwise (m,s) ---
-    sigma_m = 3e-21  # [m^2], Casseau
+    sigma_m = 1.5e-21  # [m^2], Casseau
+    # sigma_m = 1e-20  # [m^2], Gnoffo
     sigma_v = sigma_m * (50000.0 / jnp.clip(T, 1e-12, None)) ** 2  # [n_cells] m^2
 
     cbar_m = jnp.sqrt(
@@ -617,34 +617,3 @@ def compute_eT_relaxation(
     Q_eT = 2.0 * rho_e * (3.0 * R_bar / 2.0) * (T - T_v) * sum_nu_over_M
 
     return Q_eT
-
-
-def compute_electron_impact_ionization_loss(
-    U: Float[Array, "n_cells n_variables"],
-    equation_manager: equation_manager_types.EquationManager,
-) -> Float[Array, "n_cells"]:
-    """Compute electron energy loss due to electron impact ionization (Term 8).
-
-    Implements Term 8 from Eq. 16 (NASA TP-2867):
-        Q_ion = -sum_s (n_dot_e_s * I_hat_s)
-
-    where:
-        n_dot_e_s = molar ionization rate of species s by electron impact [mol/m³/s]
-        I_hat_s = first ionization energy of species s [J/mol]
-
-    For FROZEN CHEMISTRY: returns 0 (no reactions → n_dot_e_s = 0)
-
-    Future implementation requires:
-        - Ionization reaction rates from chemical kinetics
-        - Reactions: N + e_minus -> N_plus + 2e_minus, O + e_minus -> O_plus + 2e_minus, etc.
-
-    Args:
-        U: Conserved state [n_cells, n_variables]
-        equation_manager: Contains species and reaction data
-
-    Returns:
-        Q_ion: Energy loss rate [W/m³] (negative = energy removed from electron mode)
-    """
-    # Frozen chemistry: no ionization reactions
-    n_cells = U.shape[0]
-    return jnp.zeros(n_cells)

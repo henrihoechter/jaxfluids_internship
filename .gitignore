@@ -208,3 +208,6 @@ __marimo__/
 
 experiments/*
 !experiments/example.py
+literature/
+profiler_data/
+*.npz

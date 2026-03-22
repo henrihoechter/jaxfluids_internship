@@ -16,7 +16,7 @@
   },
   "reactions": [
     {
-      "table_index": 1,
+      "table_index": "2g",
       "equation": "O2 + N -> O + O + N",
       "description": "Gnoffo Table III (Park model)",
       "reactants": {
@@ -85,7 +85,7 @@
       "qk_source": "Casseau Appendix C (Tables C1/C2)"
     },
     {
-      "table_index": 2,
+      "table_index": "2e",
       "equation": "O2 + NO -> O + O + NO",
       "description": "Gnoffo Table III (Park model)",
       "reactants": {
@@ -154,7 +154,7 @@
       "qk_source": "Casseau Appendix C (Tables C1/C2)"
     },
     {
-      "table_index": 3,
+      "table_index": "2c",
       "equation": "O2 + N2 -> O + O + N2",
       "description": "Gnoffo Table III (Park model)",
       "reactants": {
@@ -223,7 +223,7 @@
       "qk_source": "Casseau Appendix C (Tables C1/C2)"
     },
     {
-      "table_index": 4,
+      "table_index": "2a",
       "equation": "O2 + O2 -> O + O + O2",
       "description": "Gnoffo Table III (Park model)",
       "reactants": {
@@ -291,7 +291,7 @@
       "qk_source": "Casseau Appendix C (Tables C1/C2)"
     },
     {
-      "table_index": 5,
+      "table_index": "2i",
       "equation": "O2 + O -> O + O + O",
       "description": "Gnoffo Table III (Park model)",
       "reactants": {
@@ -359,7 +359,7 @@
       "qk_source": "Casseau Appendix C (Tables C1/C2)"
     },
     {
-      "table_index": 6,
+      "table_index": "1i",
       "equation": "N2 + O -> N + N + O",
       "description": "Gnoffo Table III (Park model)",
       "reactants": {
@@ -428,7 +428,7 @@
       "qk_source": "Casseau Appendix C (Tables C1/C2)"
     },
     {
-      "table_index": 7,
+      "table_index": "1c",
       "equation": "N2 + O2 -> N + N + O2",
       "description": "Gnoffo Table III (Park model)",
       "reactants": {
@@ -497,7 +497,7 @@
       "qk_source": "Casseau Appendix C (Tables C1/C2)"
     },
     {
-      "table_index": 8,
+      "table_index": "1e",
       "equation": "N2 + NO -> N + N + NO",
       "description": "Gnoffo Table III (Park model)",
       "reactants": {
@@ -566,7 +566,7 @@
       "qk_source": "Casseau Appendix C (Tables C1/C2)"
     },
     {
-      "table_index": 9,
+      "table_index": "1a",
       "equation": "N2 + N2 -> N + N + N2",
       "description": "Gnoffo Table III (Park model)",
       "reactants": {
@@ -634,7 +634,7 @@
       "qk_source": "Casseau Appendix C (Tables C1/C2)"
     },
     {
-      "table_index": 10,
+      "table_index": "1g",
       "equation": "N2 + N -> N + N + N",
       "description": "Gnoffo Table III (Park model)",
       "reactants": {
@@ -702,7 +702,7 @@
       "qk_source": "Casseau Appendix C (Tables C1/C2)"
     },
     {
-      "table_index": 11,
+      "table_index": "3c",
       "equation": "NO + N2 -> N + O + N2",
       "description": "Gnoffo Table III (Park model)",
       "reactants": {
@@ -772,7 +772,7 @@
       "qk_source": "Casseau Appendix C (Tables C1/C2)"
     },
     {
-      "table_index": 12,
+      "table_index": "3e",
       "equation": "NO + O2 -> N + O + O2",
       "description": "Gnoffo Table III (Park model)",
       "reactants": {
@@ -842,7 +842,7 @@
       "qk_source": "Casseau Appendix C (Tables C1/C2)"
     },
     {
-      "table_index": 13,
+      "table_index": "3a",
       "equation": "NO + NO -> N + O + NO",
       "description": "Gnoffo Table III (Park model)",
       "reactants": {
@@ -911,7 +911,7 @@
       "qk_source": "Casseau Appendix C (Tables C1/C2)"
     },
     {
-      "table_index": 14,
+      "table_index": "3i",
       "equation": "NO + O -> N + O + O",
       "description": "Gnoffo Table III (Park model)",
       "reactants": {
@@ -980,7 +980,7 @@
       "qk_source": "Casseau Appendix C (Tables C1/C2)"
     },
     {
-      "table_index": 15,
+      "table_index": "3g",
       "equation": "NO + N -> N + O + N",
       "description": "Gnoffo Table III (Park model)",
       "reactants": {
@@ -1049,7 +1049,7 @@
       "qk_source": "Casseau Appendix C (Tables C1/C2)"
     },
     {
-      "table_index": 16,
+      "table_index": "24a",
       "equation": "NO + O -> O2 + N",
       "description": "Gnoffo Table III (Park model)",
       "reactants": {
@@ -1118,7 +1118,7 @@
       "qk_source": "Casseau Appendix C (Table C12, NO+O->O2+N)"
     },
     {
-      "table_index": 17,
+      "table_index": "22a",
       "equation": "N2 + O -> NO + N",
       "description": "Gnoffo Table III (Park model)",
       "reactants": {
@@ -1187,7 +1187,7 @@
       "qk_source": "Casseau Appendix C (Table C12, N2+O->NO+N)"
     },
     {
-      "table_index": 18,
+      "table_index": "24b",
       "equation": "O2 + N -> NO + O",
       "description": "Gnoffo Table III (Park model)",
       "reactants": {
@@ -1200,8 +1200,8 @@
       },
       "is_dissociation": false,
       "is_electron_impact": false,
-      "C_f": 5.3e-15,
-      "n_f": -0.47,
+      "C_f": 4.6e-17,
+      "n_f": 0.04,
       "E_f_over_k": 1448.5941032079838,
       "equilibrium_coeffs_casseau": [
         {
@@ -1276,7 +1276,7 @@
       ]
     },
     {
-      "table_index": 19,
+      "table_index": "22b",
       "equation": "NO + N -> N2 + O",
       "description": "Gnoffo Table III (Park model)",
       "reactants": {

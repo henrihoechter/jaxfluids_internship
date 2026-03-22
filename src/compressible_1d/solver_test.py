@@ -81,7 +81,7 @@ def test_compute_flux_output_shape():
     U_L = create_test_state(n_interfaces, n_species)
     U_R = create_test_state(n_interfaces, n_species)
 
-    F = solver.compute_flux(U_L, U_R, equation_manager)
+    F = solver.compute_hllc_flux(U_L, U_R, equation_manager)
 
     expected_shape = (n_interfaces, n_variables)
     assert F.shape == expected_shape, f"Expected shape {expected_shape}, got {F.shape}"
@@ -99,7 +99,7 @@ def test_compute_flux_zero_velocity():
     # Set zero velocity
     U = U.at[:, n_species].set(0.0)
 
-    F = solver.compute_flux(U, U, equation_manager)
+    F = solver.compute_hllc_flux(U, U, equation_manager)
 
     # For identical states with zero velocity:
     # - Species flux should be zero
@@ -122,7 +122,7 @@ def test_compute_flux_consistency():
     U = create_test_state(n_interfaces, n_species)
 
     # Compute flux for identical left and right states
-    F_riemann = solver.compute_flux(U, U, equation_manager)
+    F_riemann = solver.compute_hllc_flux(U, U, equation_manager)
 
     # Compute physical flux directly
     from compressible_1d import equation_manager_utils
@@ -232,7 +232,7 @@ def test_flux_upwind_property():
     # Right state with same properties but zero velocity
     U_R = create_test_state(n_interfaces, n_species)
 
-    F = solver.compute_flux(U_L, U_R, equation_manager)
+    F = solver.compute_hllc_flux(U_L, U_R, equation_manager)
 
     # With positive velocity, flux should be influenced by left state
     # Species flux should be positive (flow to the right)
@@ -254,7 +254,7 @@ def test_flux_jit_compilation():
     # JIT compile
     @jax.jit
     def compute_flux_jit(U_L, U_R):
-        return solver.compute_flux(U_L, U_R, equation_manager)
+        return solver.compute_hllc_flux(U_L, U_R, equation_manager)
 
     # First call (compilation)
     F1 = compute_flux_jit(U_L, U_R)

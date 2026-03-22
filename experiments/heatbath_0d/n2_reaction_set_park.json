@@ -9,7 +9,7 @@
     "NO"
   ],
   "units": {
-    "C_f": "SI per-molecule (m^3/molecule/s for bimolecular, m^6/molecule^2/s for termolecular)",
+    "C_f": "SI per-molecule (m^3/molecule/s for bimolecular)",
     "n_f": "dimensionless",
     "E_f_over_k": "K (activation energy / Boltzmann constant)",
     "equilibrium_coeffs_casseau": "Casseau eq. 2.69 coefficients; n_ref in cm^-3"
@@ -28,12 +28,9 @@
       },
       "is_dissociation": true,
       "is_electron_impact": false,
-      "other_C_f": 1.1623e-08,
-      "other_n_f": -1.6,
-      "other_E_f_over_k": 113200.0,
-      "C_f": 4.10153e-12,
-      "n_f": -0.62,
-      "E_f_over_k": 113500.0,
+      "C_f": 1.162377e-8,
+      "n_f": -1.6,
+      "E_f_over_k": 113200.0,
       "equilibrium_coeffs_casseau": [
         {
           "n_ref_cm3": 1e14,

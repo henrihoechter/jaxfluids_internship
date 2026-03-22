@@ -121,7 +121,7 @@ def run(
     U = U_init
     t = 0.0
     if dt_array is None:
-        n_steps = int(t_final / dt)
+        n_steps = round(t_final / dt)
         dt_sequence = jnp.full((n_steps,), dt, dtype=jnp.result_type(dt, 0.0))
     else:
         n_steps = int(dt_array.shape[0])
@@ -135,12 +135,9 @@ def run(
     U_history = U_history.at[0, :, :].set(U_init)
     t_history = t_history.at[0].set(0.0)
 
-    advance_one_step_jitted = jax.jit(advance_one_step)
-
     snapshot_idx = 1
     for step in range(1, n_steps + 1):
         dt_step = dt_sequence[step - 1]
-        # U = advance_one_step_jitted(U, equation_manager)
         U = advance_one_step(U, equation_manager, dt_step)  # debug
         t += float(dt_step)
 
@@ -171,7 +168,7 @@ def run_scan(
 
     # Number of steps/snapshots (static given dt/t_final/save_interval)
     if dt_array is None:
-        n_steps = int(t_final / dt)
+        n_steps = round(t_final / dt)
         dt_sequence = jnp.full((n_steps,), dt, dtype=jnp.result_type(dt, 0.0))
     else:
         n_steps = int(dt_array.shape[0])
@@ -348,34 +345,45 @@ def compute_left_right_states(
     Float[Array, "n_interfaces n_variables"],
     Float[Array, "n_interfaces n_variables"],
 ]:
-    """Compute left and right states at cell interfaces.
+    """Compute left and right states at cell interfaces."""
 
-    Args:
-        U: State with ghost cells [n_cells + 2*n_halo, n_variables]
-        equation_manager: Contains spatial scheme configuration
+    def minmod2(a, b):
+        return jnp.where(
+            a * b > 0.0,
+            jnp.sign(a) * jnp.minimum(jnp.abs(a), jnp.abs(b)),
+            0.0,
+        )
 
-    Returns:
-        U_L, U_R: Left and right states at interfaces
-    """
+    def minmod3(a, b, c):
+        return minmod2(a, minmod2(b, c))
+
     if equation_manager.numerics_config.spatial_scheme == "first_order":
         U_L = U[:-1, :]
         U_R = U[1:, :]
+
     elif equation_manager.numerics_config.spatial_scheme == "muscl":
         delta_minus = U[1:-1, :] - U[:-2, :]  # U[i] - U[i-1]
         delta_plus = U[2:, :] - U[1:-1, :]  # U[i+1] - U[i]
 
-        # Minmod slope limiter
-        delta_center = jnp.where(
-            delta_minus * delta_plus > 0,
-            jnp.sign(delta_minus)
-            * jnp.minimum(jnp.abs(delta_minus), jnp.abs(delta_plus)),
-            0.0,
-        )
+        limiter = equation_manager.numerics_config.slope_limiter
+        if limiter == "mc":
+            # MC limiter: minmod(0.5*(d- + d+), 2*d-, 2*d+)
+            delta_center = minmod3(
+                0.5 * (delta_minus + delta_plus),
+                2.0 * delta_minus,
+                2.0 * delta_plus,
+            )
+        elif limiter == "minmod":
+            delta_center = minmod2(delta_minus, delta_plus)
+        else:
+            raise ValueError(f"Unknown slope limiter: {limiter}")
+
         delta_U = jnp.zeros_like(U)
         delta_U = delta_U.at[1:-1, :].set(delta_center)
 
         U_L = U[:-1, :] + 0.5 * delta_U[:-1, :]
         U_R = U[1:, :] - 0.5 * delta_U[1:, :]
+
     else:
         raise ValueError(
             f"Unknown spatial scheme: {equation_manager.numerics_config.spatial_scheme}"
@@ -405,7 +413,15 @@ def compute_convective_flux(
     if equation_manager.numerics_config.flux_scheme == "lax_friedrichs":
         raise NotImplementedError("Lax-Friedrichs flux not yet implemented")
     elif equation_manager.numerics_config.flux_scheme == "hllc":
-        return solver.compute_flux(
+        return solver.compute_hllc_flux(
+            U_L,
+            U_R,
+            equation_manager,
+            primitives_L=primitives_L,
+            primitives_R=primitives_R,
+        )
+    elif equation_manager.numerics_config.flux_scheme == "exact_riemann":
+        return solver.compute_exact_riemann_flux(
             U_L,
             U_R,
             equation_manager,
