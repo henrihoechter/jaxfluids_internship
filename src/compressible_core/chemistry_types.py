@@ -102,8 +102,8 @@ class SpeciesTable:
         assert self.ionization_energy.shape == (
             n_sp,
         ), f"ionization_energy shape {self.ionization_energy.shape} != ({n_sp},)"
-        assert self.vibrational_relaxation_factor.shape == (
-            n_sp,
+        assert (
+            self.vibrational_relaxation_factor.shape == (n_sp,)
         ), f"vibrational_relaxation_factor shape {self.vibrational_relaxation_factor.shape} != ({n_sp},)"
         n_mol = self.vibrational_relaxation_molecule_indices.shape[0]
         n_partners = self.vibrational_relaxation_partner_indices.shape[0]
@@ -284,13 +284,19 @@ class ReactionTable:
         n_species = len(self.species_names)
 
         # Check stoichiometry shapes
-        assert self.reactant_stoich.shape == (
-            n_reactions,
-            n_species,
+        assert (
+            self.reactant_stoich.shape
+            == (
+                n_reactions,
+                n_species,
+            )
         ), f"reactant_stoich shape {self.reactant_stoich.shape} != ({n_reactions}, {n_species})"
-        assert self.product_stoich.shape == (
-            n_reactions,
-            n_species,
+        assert (
+            self.product_stoich.shape
+            == (
+                n_reactions,
+                n_species,
+            )
         ), f"product_stoich shape {self.product_stoich.shape} != ({n_reactions}, {n_species})"
 
         # Check Arrhenius parameter shapes
@@ -318,8 +324,8 @@ class ReactionTable:
         assert self.is_dissociation.shape == (
             n_reactions,
         ), f"is_dissociation shape {self.is_dissociation.shape} != ({n_reactions},)"
-        assert self.is_electron_impact.shape == (
-            n_reactions,
+        assert (
+            self.is_electron_impact.shape == (n_reactions,)
         ), f"is_electron_impact shape {self.is_electron_impact.shape} != ({n_reactions},)"
 
     @property
@@ -353,6 +359,7 @@ class ReactionTable:
             )
 
 
+@jax.tree_util.register_dataclass
 @dataclass(frozen=True, slots=True)
 class CollisionIntegralTable:
     """Collision integral data for transport property calculations.
@@ -369,7 +376,7 @@ class CollisionIntegralTable:
     """
 
     # Species pair names (s, r) - order matters for lookup
-    species_pairs: tuple[tuple[str, str], ...]
+    species_pairs: tuple[tuple[str, str], ...] = field(metadata=dict(static=True))
 
     # Collision integrals at reference temperatures [n_pairs]
     # Values are log10(π·Ω^(k,k)_sr) in cm²
