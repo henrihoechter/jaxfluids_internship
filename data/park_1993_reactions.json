@@ -1,7 +1,13 @@
 {
   "description": "Park kinetic model for air chemistry (neutral species only). From NASA TP-2867 Table III. All M reactions expanded into explicit individual reactions.",
   "reference": "Gnoffo, P.A., Gupta, R.N., and Shinn, J.L., 'Conservation Equations and Physical Models for Hypersonic Air Flows in Thermal and Chemical Nonequilibrium', NASA TP-2867, 1989.",
-  "species_order": ["N", "O", "N2", "O2", "NO"],
+  "species_order": [
+    "N",
+    "O",
+    "N2",
+    "O2",
+    "NO"
+  ],
   "units": {
     "C_f": "cgs (cm^3/mol/s for bimolecular, cm^6/mol^2/s for termolecular)",
     "n_f": "dimensionless",
@@ -11,224 +17,563 @@
   "reactions": [
     {
       "table_index": 1,
-      "equation": "O2 + N -> 2O + N",
+      "equation": "O2 + N -> O + O + N",
       "description": "O2 dissociation with M = N (from Table III reaction 1)",
-      "reactants": {"O2": 1, "N": 1},
-      "products": {"O": 2, "N": 1},
+      "reactants": {
+        "O2": 1,
+        "N": 1
+      },
+      "products": {
+        "O": 2,
+        "N": 1
+      },
       "is_dissociation": true,
       "is_electron_impact": false,
-      "C_f": 2.900e+23,
-      "n_f": -2.00,
-      "E_f_over_k": 5.975e+04,
-      "equilibrium_coeffs": [2.855, 0.988, -6.181, -0.023, -0.001]
+      "C_f": 4.815563294804155e-07,
+      "n_f": -2.0,
+      "E_f_over_k": 59750.0,
+      "equilibrium_coeffs": [
+        2.855,
+        0.988,
+        -6.181,
+        -0.023,
+        -0.001
+      ]
     },
     {
       "table_index": 1,
-      "equation": "O2 + O -> 2O + O",
+      "equation": "O2 + O -> O + O + O",
       "description": "O2 dissociation with M = O (from Table III reaction 1)",
-      "reactants": {"O2": 1, "O": 1},
-      "products": {"O": 3},
+      "reactants": {
+        "O2": 1,
+        "O": 1
+      },
+      "products": {
+        "O": 3
+      },
       "is_dissociation": true,
       "is_electron_impact": false,
-      "C_f": 2.900e+23,
-      "n_f": -2.00,
-      "E_f_over_k": 5.975e+04,
-      "equilibrium_coeffs": [2.855, 0.988, -6.181, -0.023, -0.001]
+      "C_f": 4.815563294804155e-07,
+      "n_f": -2.0,
+      "E_f_over_k": 59750.0,
+      "equilibrium_coeffs": [
+        2.855,
+        0.988,
+        -6.181,
+        -0.023,
+        -0.001
+      ]
     },
     {
       "table_index": 2,
-      "equation": "O2 + N2 -> 2O + N2",
+      "equation": "O2 + N2 -> O + O + N2",
       "description": "O2 dissociation with M = N2 (from Table III reaction 2)",
-      "reactants": {"O2": 1, "N2": 1},
-      "products": {"O": 2, "N2": 1},
+      "reactants": {
+        "O2": 1,
+        "N2": 1
+      },
+      "products": {
+        "O": 2,
+        "N2": 1
+      },
       "is_dissociation": true,
       "is_electron_impact": false,
-      "C_f": 9.680e+22,
-      "n_f": -2.00,
-      "E_f_over_k": 5.975e+04,
-      "equilibrium_coeffs": [2.855, 0.988, -6.181, -0.023, -0.001]
+      "C_f": 1.6074018170242835e-07,
+      "n_f": -2.0,
+      "E_f_over_k": 59750.0,
+      "equilibrium_coeffs": [
+        2.855,
+        0.988,
+        -6.181,
+        -0.023,
+        -0.001
+      ]
     },
     {
       "table_index": 2,
-      "equation": "O2 + O2 -> 2O + O2",
+      "equation": "O2 + O2 -> O + O + O2",
       "description": "O2 dissociation with M = O2 (from Table III reaction 2)",
-      "reactants": {"O2": 2},
-      "products": {"O": 2, "O2": 1},
+      "reactants": {
+        "O2": 2
+      },
+      "products": {
+        "O": 2,
+        "O2": 1
+      },
       "is_dissociation": true,
       "is_electron_impact": false,
-      "C_f": 9.680e+22,
-      "n_f": -2.00,
-      "E_f_over_k": 5.975e+04,
-      "equilibrium_coeffs": [2.855, 0.988, -6.181, -0.023, -0.001]
+      "C_f": 1.6074018170242835e-07,
+      "n_f": -2.0,
+      "E_f_over_k": 59750.0,
+      "equilibrium_coeffs": [
+        2.855,
+        0.988,
+        -6.181,
+        -0.023,
+        -0.001
+      ]
     },
     {
       "table_index": 2,
-      "equation": "O2 + NO -> 2O + NO",
+      "equation": "O2 + NO -> O + O + NO",
       "description": "O2 dissociation with M = NO (from Table III reaction 2)",
-      "reactants": {"O2": 1, "NO": 1},
-      "products": {"O": 2, "NO": 1},
+      "reactants": {
+        "O2": 1,
+        "NO": 1
+      },
+      "products": {
+        "O": 2,
+        "NO": 1
+      },
       "is_dissociation": true,
       "is_electron_impact": false,
-      "C_f": 9.680e+22,
-      "n_f": -2.00,
-      "E_f_over_k": 5.975e+04,
-      "equilibrium_coeffs": [2.855, 0.988, -6.181, -0.023, -0.001]
+      "C_f": 1.6074018170242835e-07,
+      "n_f": -2.0,
+      "E_f_over_k": 59750.0,
+      "equilibrium_coeffs": [
+        2.855,
+        0.988,
+        -6.181,
+        -0.023,
+        -0.001
+      ]
     },
     {
       "table_index": 3,
-      "equation": "N2 + N -> 2N + N",
+      "equation": "N2 + N -> N + N + N",
       "description": "N2 dissociation with M = N (from Table III reaction 3)",
-      "reactants": {"N2": 1, "N": 1},
-      "products": {"N": 3},
+      "reactants": {
+        "N2": 1,
+        "N": 1
+      },
+      "products": {
+        "N": 3
+      },
       "is_dissociation": true,
       "is_electron_impact": false,
-      "C_f": 3.000e+22,
-      "n_f": -1.60,
-      "E_f_over_k": 1.132e+05,
-      "equilibrium_coeffs": [1.858, -1.325, -9.856, -0.174, 0.008]
+      "C_f": 4.98161720152154e-08,
+      "n_f": -1.6,
+      "E_f_over_k": 113200.0,
+      "equilibrium_coeffs": [
+        1.858,
+        -1.325,
+        -9.856,
+        -0.174,
+        0.008
+      ]
     },
     {
       "table_index": 4,
-      "equation": "N2 + O -> 2N + O",
+      "equation": "N2 + O -> N + N + O",
       "description": "N2 dissociation with M = O (from Table III reaction 4)",
-      "reactants": {"N2": 1, "O": 1},
-      "products": {"N": 2, "O": 1},
+      "reactants": {
+        "N2": 1,
+        "O": 1
+      },
+      "products": {
+        "N": 2,
+        "O": 1
+      },
       "is_dissociation": true,
       "is_electron_impact": false,
-      "C_f": 4.980e+22,
-      "n_f": -1.60,
-      "E_f_over_k": 1.132e+05,
-      "equilibrium_coeffs": [1.858, -1.325, -9.856, -0.174, 0.008]
+      "C_f": 8.269484554525756e-08,
+      "n_f": -1.6,
+      "E_f_over_k": 113200.0,
+      "equilibrium_coeffs": [
+        1.858,
+        -1.325,
+        -9.856,
+        -0.174,
+        0.008
+      ]
     },
     {
       "table_index": 5,
-      "equation": "N2 + N2 -> 2N + N2",
+      "equation": "N2 + N2 -> N + N + N2",
       "description": "N2 dissociation with M = N2 (from Table III reaction 5)",
-      "reactants": {"N2": 2},
-      "products": {"N": 2, "N2": 1},
+      "reactants": {
+        "N2": 2
+      },
+      "products": {
+        "N": 2,
+        "N2": 1
+      },
       "is_dissociation": true,
       "is_electron_impact": false,
-      "C_f": 7.000e+21,
-      "n_f": -1.60,
-      "E_f_over_k": 1.132e+05,
-      "equilibrium_coeffs": [1.858, -1.325, -9.856, -0.174, 0.008]
+      "C_f": 1.1623773470216926e-08,
+      "n_f": -1.6,
+      "E_f_over_k": 113200.0,
+      "equilibrium_coeffs": [
+        1.858,
+        -1.325,
+        -9.856,
+        -0.174,
+        0.008
+      ]
     },
     {
       "table_index": 5,
-      "equation": "N2 + O2 -> 2N + O2",
+      "equation": "N2 + O2 -> N + N + O2",
       "description": "N2 dissociation with M = O2 (from Table III reaction 5)",
-      "reactants": {"N2": 1, "O2": 1},
-      "products": {"N": 2, "O2": 1},
+      "reactants": {
+        "N2": 1,
+        "O2": 1
+      },
+      "products": {
+        "N": 2,
+        "O2": 1
+      },
       "is_dissociation": true,
       "is_electron_impact": false,
-      "C_f": 3.700e+21,
-      "n_f": -1.60,
-      "E_f_over_k": 1.132e+05,
-      "equilibrium_coeffs": [1.858, -1.325, -9.856, -0.174, 0.008]
+      "C_f": 6.1439945485432326e-09,
+      "n_f": -1.6,
+      "E_f_over_k": 113200.0,
+      "equilibrium_coeffs": [
+        1.858,
+        -1.325,
+        -9.856,
+        -0.174,
+        0.008
+      ]
     },
     {
       "table_index": 6,
-      "equation": "N2 + NO -> 2N + NO",
+      "equation": "N2 + NO -> N + N + NO",
       "description": "N2 dissociation with M = NO (from Table III reaction 6)",
-      "reactants": {"N2": 1, "NO": 1},
-      "products": {"N": 2, "NO": 1},
+      "reactants": {
+        "N2": 1,
+        "NO": 1
+      },
+      "products": {
+        "N": 2,
+        "NO": 1
+      },
       "is_dissociation": true,
       "is_electron_impact": false,
-      "C_f": 4.980e+21,
-      "n_f": -1.60,
-      "E_f_over_k": 1.132e+05,
-      "equilibrium_coeffs": [1.858, -1.325, -9.856, -0.174, 0.008]
+      "C_f": 8.269484554525756e-09,
+      "n_f": -1.6,
+      "E_f_over_k": 113200.0,
+      "equilibrium_coeffs": [
+        1.858,
+        -1.325,
+        -9.856,
+        -0.174,
+        0.008
+      ]
     },
     {
       "table_index": 8,
       "equation": "NO + N -> N + O + N",
       "description": "NO dissociation with M = N (from Table III reaction 8)",
-      "reactants": {"NO": 1, "N": 1},
-      "products": {"N": 2, "O": 1},
+      "reactants": {
+        "NO": 1,
+        "N": 1
+      },
+      "products": {
+        "N": 2,
+        "O": 1
+      },
       "is_dissociation": true,
       "is_electron_impact": false,
-      "C_f": 7.950e+23,
-      "n_f": -2.00,
-      "E_f_over_k": 7.550e+04,
-      "equilibrium_coeffs": [0.792, -0.492, -6.761, -0.091, 0.004]
+      "C_f": 1.320128558403208e-06,
+      "n_f": -2.0,
+      "E_f_over_k": 75500.0,
+      "equilibrium_coeffs": [
+        0.792,
+        -0.492,
+        -6.761,
+        -0.091,
+        0.004
+      ]
     },
     {
       "table_index": 8,
       "equation": "NO + O -> N + O + O",
       "description": "NO dissociation with M = O (from Table III reaction 8)",
-      "reactants": {"NO": 1, "O": 1},
-      "products": {"N": 1, "O": 2},
+      "reactants": {
+        "NO": 1,
+        "O": 1
+      },
+      "products": {
+        "N": 1,
+        "O": 2
+      },
       "is_dissociation": true,
       "is_electron_impact": false,
-      "C_f": 7.950e+23,
-      "n_f": -2.00,
-      "E_f_over_k": 7.550e+04,
-      "equilibrium_coeffs": [0.792, -0.492, -6.761, -0.091, 0.004]
+      "C_f": 1.320128558403208e-06,
+      "n_f": -2.0,
+      "E_f_over_k": 75500.0,
+      "equilibrium_coeffs": [
+        0.792,
+        -0.492,
+        -6.761,
+        -0.091,
+        0.004
+      ]
     },
     {
       "table_index": 8,
       "equation": "NO + N2 -> N + O + N2",
       "description": "NO dissociation with M = N2 (from Table III reaction 8)",
-      "reactants": {"NO": 1, "N2": 1},
-      "products": {"N": 1, "O": 1, "N2": 1},
+      "reactants": {
+        "NO": 1,
+        "N2": 1
+      },
+      "products": {
+        "N": 1,
+        "O": 1,
+        "N2": 1
+      },
       "is_dissociation": true,
       "is_electron_impact": false,
-      "C_f": 7.950e+23,
-      "n_f": -2.00,
-      "E_f_over_k": 7.550e+04,
-      "equilibrium_coeffs": [0.792, -0.492, -6.761, -0.091, 0.004]
+      "C_f": 1.320128558403208e-06,
+      "n_f": -2.0,
+      "E_f_over_k": 75500.0,
+      "equilibrium_coeffs": [
+        0.792,
+        -0.492,
+        -6.761,
+        -0.091,
+        0.004
+      ]
     },
     {
       "table_index": 8,
       "equation": "NO + O2 -> N + O + O2",
       "description": "NO dissociation with M = O2 (from Table III reaction 8)",
-      "reactants": {"NO": 1, "O2": 1},
-      "products": {"N": 1, "O": 1, "O2": 1},
+      "reactants": {
+        "NO": 1,
+        "O2": 1
+      },
+      "products": {
+        "N": 1,
+        "O": 1,
+        "O2": 1
+      },
       "is_dissociation": true,
       "is_electron_impact": false,
-      "C_f": 7.950e+23,
-      "n_f": -2.00,
-      "E_f_over_k": 7.550e+04,
-      "equilibrium_coeffs": [0.792, -0.492, -6.761, -0.091, 0.004]
+      "C_f": 1.320128558403208e-06,
+      "n_f": -2.0,
+      "E_f_over_k": 75500.0,
+      "equilibrium_coeffs": [
+        0.792,
+        -0.492,
+        -6.761,
+        -0.091,
+        0.004
+      ]
     },
     {
       "table_index": 8,
       "equation": "NO + NO -> N + O + NO",
       "description": "NO dissociation with M = NO (from Table III reaction 8)",
-      "reactants": {"NO": 2},
-      "products": {"N": 1, "O": 1, "NO": 1},
+      "reactants": {
+        "NO": 2
+      },
+      "products": {
+        "N": 1,
+        "O": 1,
+        "NO": 1
+      },
       "is_dissociation": true,
       "is_electron_impact": false,
-      "C_f": 7.950e+23,
-      "n_f": -2.00,
-      "E_f_over_k": 7.550e+04,
-      "equilibrium_coeffs": [0.792, -0.492, -6.761, -0.091, 0.004]
+      "C_f": 1.320128558403208e-06,
+      "n_f": -2.0,
+      "E_f_over_k": 75500.0,
+      "equilibrium_coeffs": [
+        0.792,
+        -0.492,
+        -6.761,
+        -0.091,
+        0.004
+      ]
     },
     {
       "table_index": 9,
-      "equation": "NO + O <-> O2 + N",
+      "equation": "NO + O -> O2 + N",
       "description": "Exchange reaction (Zeldovich)",
-      "reactants": {"NO": 1, "O": 1},
-      "products": {"O2": 1, "N": 1},
+      "reactants": {
+        "NO": 1,
+        "O": 1
+      },
+      "products": {
+        "O2": 1,
+        "N": 1
+      },
       "is_dissociation": false,
       "is_electron_impact": false,
-      "C_f": 8.370e+12,
+      "C_f": 1.3898711992245095e-17,
       "n_f": 0.0,
-      "E_f_over_k": 1.945e+04,
-      "equilibrium_coeffs": [-2.063, -1.480, -0.580, -0.114, 0.005]
+      "E_f_over_k": 19450.0,
+      "equilibrium_coeffs": [
+        -2.063,
+        -1.48,
+        -0.58,
+        -0.114,
+        0.005
+      ]
     },
     {
       "table_index": 10,
-      "equation": "N2 + O <-> NO + N",
+      "equation": "N2 + O -> NO + N",
       "description": "Exchange reaction (Zeldovich)",
-      "reactants": {"N2": 1, "O": 1},
-      "products": {"NO": 1, "N": 1},
+      "reactants": {
+        "N2": 1,
+        "O": 1
+      },
+      "products": {
+        "NO": 1,
+        "N": 1
+      },
       "is_dissociation": false,
       "is_electron_impact": false,
-      "C_f": 6.440e+17,
-      "n_f": -1.00,
-      "E_f_over_k": 3.837e+04,
-      "equilibrium_coeffs": [1.066, -0.833, -3.095, -0.084, 0.004]
+      "C_f": 1.0693871592599573e-12,
+      "n_f": -1.0,
+      "E_f_over_k": 38370.0,
+      "equilibrium_coeffs": [
+        1.066,
+        -0.833,
+        -3.095,
+        -0.084,
+        0.004
+      ]
+    },
+    
+    {
+      "table_index": 11,
+      "equation": "O2 + N -> NO + O",
+      "description": "",
+      "reactants": {
+        "O2": 1,
+        "N": 1
+      },
+      "products": {
+        "NO": 1,
+        "O": 1
+      },
+      "is_dissociation": false,
+      "is_electron_impact": false,
+      "C_f": 1.3948528164260314e-17,
+      "n_f": 0.0,
+      "E_f_over_k": 19400.0,
+      "equilibrium_coeffs_casseau": [
+        {
+          "n_ref_cm3": 100000000000000.0,
+          "A0": 0.35438,
+          "A1": -1.8821,
+          "A2": -0.72111,
+          "A3": -1.1797,
+          "A4": -0.030831
+        },
+        {
+          "n_ref_cm3": 1000000000000000.0,
+          "A0": 0.093613,
+          "A1": -1.7806,
+          "A2": -1.0975,
+          "A3": -1.0128,
+          "A4": -0.041949
+        },
+        {
+          "n_ref_cm3": 1e+16,
+          "A0": -0.003732,
+          "A1": -1.7434,
+          "A2": -1.2394,
+          "A3": -0.94952,
+          "A4": -0.046182
+        },
+        {
+          "n_ref_cm3": 1e+17,
+          "A0": 0.004815,
+          "A1": -1.7443,
+          "A2": -1.2227,
+          "A3": -0.95824,
+          "A4": -0.045545
+        },
+        {
+          "n_ref_cm3": 1e+18,
+          "A0": -0.009758,
+          "A1": -1.7386,
+          "A2": -1.2436,
+          "A3": -0.949,
+          "A4": -0.046159
+        },
+        {
+          "n_ref_cm3": 1e+19,
+          "A0": -0.002428,
+          "A1": -1.7415,
+          "A2": -1.2331,
+          "A3": -0.95365,
+          "A4": -0.04585
+        }
+      ]
+    },
+    {
+      "table_index": 12,
+      "equation": "NO + N -> N2 + O",
+      "description": "Gnoffo Table III (Park model)",
+      "reactants": {
+        "NO": 1,
+        "N": 1
+      },
+      "products": {
+        "N2": 1,
+        "O": 1
+      },
+      "is_dissociation": false,
+      "is_electron_impact": false,
+      "C_f": 1.0627450029912618e-12,
+      "n_f": -1,
+      "E_f_over_k": 38400.0,
+      "equilibrium_coeffs_casseau": [
+        {
+          "n_ref_cm3": 100000000000000.0,
+          "A0": 1.3261,
+          "A1": 0.75268,
+          "A2": 1.2474,
+          "A3": -4.1857,
+          "A4": 0.02184
+        },
+        {
+          "n_ref_cm3": 1000000000000000.0,
+          "A0": 1.0653,
+          "A1": 0.85417,
+          "A2": 0.87093,
+          "A3": -4.0188,
+          "A4": 0.010721
+        },
+        {
+          "n_ref_cm3": 1e+16,
+          "A0": 0.96794,
+          "A1": 0.89131,
+          "A2": 0.7291,
+          "A3": -3.9555,
+          "A4": 0.006488
+        },
+        {
+          "n_ref_cm3": 1e+17,
+          "A0": 0.97646,
+          "A1": 0.89043,
+          "A2": 0.74572,
+          "A3": -3.9642,
+          "A4": 0.007123
+        },
+        {
+          "n_ref_cm3": 1e+18,
+          "A0": 0.96188,
+          "A1": 0.89617,
+          "A2": 0.72479,
+          "A3": -3.955,
+          "A4": 0.006509
+        },
+        {
+          "n_ref_cm3": 1e+19,
+          "A0": 0.96921,
+          "A1": 0.89329,
+          "A2": 0.73531,
+          "A3": -3.9596,
+          "A4": 0.006818
+        }
+      ]
     }
   ]
 }
