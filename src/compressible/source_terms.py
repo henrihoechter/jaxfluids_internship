@@ -7,21 +7,18 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Float, Array
 
-from compressible_1d import equation_manager_types
-from compressible_1d import equation_manager_utils
+from compressible.equation_manager_types import EquationManager
+from compressible import state as state_module
 from compressible_core import chemistry
 from compressible_core import constants
 from compressible_core import thermodynamic_relations
 
 
-import functools
-
-
-@functools.partial(jax.named_call, name="source term")
+@jax.named_call
 def compute_source_terms(
     U: Float[Array, "n_cells n_variables"],
-    equation_manager: equation_manager_types.EquationManager,
-    primitives: equation_manager_utils.Primitives1D | None = None,
+    equation_manager: EquationManager,
+    primitives: state_module.Primitives | None = None,
 ) -> Float[Array, "n_cells n_variables"]:
     """Compute all source terms: chemistry + vibrational relaxation.
 
@@ -36,8 +33,9 @@ def compute_source_terms(
         S: Source terms [n_cells, n_variables]
             S[:, 0:n_species] = ω̇_s (species mass production rates)
             S[:, n_species] = 0 (momentum, inviscid)
-            S[:, n_species+1] = 0 (no chemical energy source)
-            S[:, n_species+2] = Q_TV + Q_vib_chem (vibrational energy)
+            S[:, n_species+1] = 0 (momentum, inviscid)
+            S[:, n_species+2] = 0 (no chemical energy source)
+            S[:, n_species+3] = Q_TV + Q_vib_chem (vibrational energy)
 
     Notes:
         - Frozen chemistry: species source terms are zero (ω̇_i = 0)
@@ -52,7 +50,7 @@ def compute_source_terms(
     S = jnp.zeros((n_cells, n_variables))
 
     if primitives is None:
-        primitives = equation_manager_utils.extract_primitives(U, equation_manager)
+        primitives = state_module.extract_primitives(U, equation_manager)
 
     # === Chemical Source Terms ===
     omega_dot, Q_vib_chem = compute_chemical_source(
@@ -69,6 +67,7 @@ def compute_source_terms(
 
     # Term 6: Vibrational-translational relaxation
     Q_TV = compute_vibrational_relaxation(U, equation_manager, primitives=primitives)
+    # Q_TV = jnp.zeros_like(Q_TV)
 
     Q_VV = jnp.zeros_like(Q_TV)  # TODO: implement vibrational-vibrational relaxation
     Q_eT = jnp.zeros_like(Q_TV)  # TODO: implement electron-translational relaxation
@@ -86,11 +85,10 @@ def compute_source_terms(
     return S
 
 
-@jax.named_call
 def compute_chemical_source(
     U: Float[Array, "n_cells n_variables"],
-    equation_manager: equation_manager_types.EquationManager,
-    primitives: equation_manager_utils.Primitives1D | None = None,
+    equation_manager: EquationManager,
+    primitives: state_module.Primitives | None = None,
 ) -> tuple[
     Float[Array, "n_cells n_species"],
     Float[Array, " n_cells"],
@@ -118,8 +116,9 @@ def compute_chemical_source(
 
     # Extract primitives (only need T and T_v for rate calculations)
     if primitives is None:
-        primitives = equation_manager_utils.extract_primitives(U, equation_manager)
-    _, _, T, T_v, _ = primitives
+        primitives = state_module.extract_primitives(U, equation_manager)
+    T = primitives.T
+    T_v = primitives.Tv
 
     rho_s = U[:, :n_species]
 
@@ -136,8 +135,8 @@ def compute_chemical_source(
 
 def compute_vibrational_relaxation(
     U: Float[Array, "n_cells n_variables"],
-    equation_manager: equation_manager_types.EquationManager,
-    primitives: equation_manager_utils.Primitives1D | None = None,
+    equation_manager: EquationManager,
+    primitives: state_module.Primitives | None = None,
 ) -> Float[Array, "n_cells"]:
     """Compute vibrational relaxation source term Q_dot_v.
 
@@ -157,8 +156,13 @@ def compute_vibrational_relaxation(
         Q_dot_v: Relaxation source term [n_cells] in W/m³
     """
     if primitives is None:
-        primitives = equation_manager_utils.extract_primitives(U, equation_manager)
-    Y_s, rho, T, T_v, p = primitives
+        primitives = state_module.extract_primitives(U, equation_manager)
+
+    Y_s = primitives.Y_s
+    rho = primitives.rho
+    T = primitives.T
+    T_v = primitives.Tv
+    p = primitives.p
 
     # Compute equilibrium vibrational energy at T per species
     # Shape: [n_species, n_cells]
@@ -201,7 +205,7 @@ def compute_relaxation_time(
     T: Float[Array, "n_cells"],
     T_v: Float[Array, "n_cells"],
     p: Float[Array, "n_cells"],
-    equation_manager: equation_manager_types.EquationManager,
+    equation_manager: EquationManager,
 ) -> Float[Array, "n_species n_cells"]:
     """Compute Millikan-White relaxation time with Park correction per species.
 
@@ -341,7 +345,7 @@ def compute_relaxation_time_2_casseau(
     rho: Float[Array, "n_cells"],
     T: Float[Array, "n_cells"],
     p: Float[Array, "n_cells"],
-    equation_manager: equation_manager_types.EquationManager,
+    equation_manager: EquationManager,
 ) -> Float[Array, "n_species n_cells"]:
     """Compute vibrational relaxation time using pairwise Park data (Casseau).
 
@@ -399,8 +403,7 @@ def compute_relaxation_time_2_casseau(
     tau_mw_ms = jnp.exp(exp_arg) / jnp.clip(p_atm, 1e-300, None)[:, None, None]
 
     # --- Park correction, computed pairwise (m,s) ---
-    sigma_m = 1.5e-21  # [m^2], Casseau
-    # sigma_m = 1e-20  # [m^2], Gnoffo
+    sigma_m = 1e-21  # [m^2], Casseau
     sigma_v = sigma_m * (50000.0 / jnp.clip(T, 1e-12, None)) ** 2  # [n_cells] m^2
 
     cbar_m = jnp.sqrt(
@@ -536,7 +539,7 @@ def compute_electron_ion_collision_frequency(
 
 def compute_eT_relaxation(
     U: Float[Array, "n_cells n_variables"],
-    equation_manager: equation_manager_types.EquationManager,
+    equation_manager: EquationManager,
 ) -> Float[Array, "n_cells"]:
     """Compute electron-translational energy relaxation source term (Term 7).
 
@@ -566,7 +569,7 @@ def compute_eT_relaxation(
         return jnp.zeros(n_cells)  # No electrons → term = 0
 
     # Extract primitives
-    Y_s, rho, T, T_v, p = equation_manager_utils.extract_primitives_from_U(
+    Y_s, rho, _, _, T, T_v, p = state_module.extract_primitives_from_U(
         U, equation_manager
     )
 
@@ -617,3 +620,34 @@ def compute_eT_relaxation(
     Q_eT = 2.0 * rho_e * (3.0 * R_bar / 2.0) * (T - T_v) * sum_nu_over_M
 
     return Q_eT
+
+
+def compute_electron_impact_ionization_loss(
+    U: Float[Array, "n_cells n_variables"],
+    equation_manager: EquationManager,
+) -> Float[Array, "n_cells"]:
+    """Compute electron energy loss due to electron impact ionization (Term 8).
+
+    Implements Term 8 from Eq. 16 (NASA TP-2867):
+        Q_ion = -sum_s (n_dot_e_s * I_hat_s)
+
+    where:
+        n_dot_e_s = molar ionization rate of species s by electron impact [mol/m³/s]
+        I_hat_s = first ionization energy of species s [J/mol]
+
+    For FROZEN CHEMISTRY: returns 0 (no reactions → n_dot_e_s = 0)
+
+    Future implementation requires:
+        - Ionization reaction rates from chemical kinetics
+        - Reactions: N + e_minus -> N_plus + 2e_minus, O + e_minus -> O_plus + 2e_minus, etc.
+
+    Args:
+        U: Conserved state [n_cells, n_variables]
+        equation_manager: Contains species and reaction data
+
+    Returns:
+        Q_ion: Energy loss rate [W/m³] (negative = energy removed from electron mode)
+    """
+    # Frozen chemistry: no ionization reactions
+    n_cells = U.shape[0]
+    return jnp.zeros(n_cells)

@@ -7,8 +7,8 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from compressible import Mesh
 from compressible_core import chemistry_utils, constants, energy_models
-from compressible_2d import mesh_gmsh
 
 
 def make_piecewise_fn(
@@ -75,7 +75,7 @@ def build_structured_mesh_2d(
         boundary_edges.append((node_index(i, 0), node_index(i + 1, 0), bottom_tag))
         boundary_edges.append((node_index(i, ny), node_index(i + 1, ny), top_tag))
 
-    mesh = mesh_gmsh.Mesh2D.from_cells(nodes, cells, boundary_edges)
+    mesh = Mesh.from_cells(nodes, cells, boundary_edges)
     dx = length_x / nx
     dy = length_y / ny
     x_centers = 0.5 * (x_nodes[:-1] + x_nodes[1:])

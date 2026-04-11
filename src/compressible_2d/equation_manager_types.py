@@ -16,7 +16,7 @@ class BoundaryConditionConfig2D:
     """Boundary condition mapping from physical tags to config dictionaries.
 
     Each entry should be of the form:
-        {tag: {"type": "inflow"|"outflow"|"wall"|"wall_slip"|"axisymmetric", ...params}}
+        {tag: {"type": "inflow"|"outflow"|"wall"|"wall_slip"|"wall_euler", ...params}}
     """
 
     tag_to_bc: dict[int, dict]

@@ -9,18 +9,23 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from compressible import (
+    build_and_register_legacy_2d_equation_manager,
+    ClippingConfig,
+    EquationManager,
+    Mesh,
+    NumericsConfig,
+    advance_one_step,
+    build_boundary_arrays_2d,
+    compute_U_from_primitives,
+    run_scan,
+)
 from compressible_core import chemistry_utils, energy_models
 from compressible_core import transport_model_casseau_utils as transport_casseau
 from compressible_core import transport_model_gnoffo_utils as transport_core
 from compressible_core import chemistry
 from compressible_core.transport_models_types import TransportModelConfig
 from compressible_core.transport_models_utils import build_transport_model_from_config
-
-from compressible_2d import mesh_gmsh
-from compressible_2d import equation_manager
-from compressible_2d import equation_manager_types
-from compressible_2d import equation_manager_utils
-from compressible_2d import numerics_types
 
 
 def load_species_table(species_names: tuple[str, ...]) -> chemistry_utils.SpeciesTable:
@@ -124,38 +129,39 @@ def main() -> None:
             data_dir / "air_5_casseau_transport.json", species_names
         )
 
-    numerics_config = numerics_types.NumericsConfig2D(
+    numerics_config = NumericsConfig(
         dt=args.dt,
         cfl=args.cfl,
         dt_mode=args.dt_mode,
         integrator_scheme="rk2",
         spatial_scheme="first_order",
         flux_scheme="hllc",
-        axisymmetric=True,
-        clipping=numerics_types.ClippingConfig2D(),
+        clipping=ClippingConfig(),
     )
 
-    boundary_config = equation_manager_types.BoundaryConditionConfig2D(
-        tag_to_bc={
-            args.tag_inflow: {
-                "type": "inflow",
-                "rho": rho_inf,
-                "u": U_inf,
-                "v": 0.0,
-                "T": T_inf,
-                "Tv": T_inf,
-                "Y": [1.0],
-            },
-            args.tag_outflow: {"type": "outflow"},
-            args.tag_wall: {"type": "wall_euler", "Tw": Tw},
-            args.tag_axis: {"type": "axisymmetric"},
-        }
-    )
+    tag_to_bc = {
+        args.tag_inflow: {
+            "type": "inflow",
+            "rho": rho_inf,
+            "u": U_inf,
+            "v": 0.0,
+            "T": T_inf,
+            "Tv": T_inf,
+            "Y": [1.0],
+        },
+        args.tag_outflow: {"type": "outflow"},
+        args.tag_wall: {"type": "wall_euler", "Tw": Tw},
+        args.tag_axis: {"type": "wall_euler"},
+    }
 
-    mesh = mesh_gmsh.read_gmsh_v2_wedge_plane(
+    mesh = Mesh.from_gmsh_wedge(
         args.mesh,
         wedge_plane_tag=args.wedge_plane_tag,
-        remap_tags={args.axis_remap_from: args.tag_axis},
+        remap_tags=(
+            {args.axis_remap_from: args.tag_axis}
+            if args.axis_remap_from is not None
+            else None
+        ),
         axis_tag=args.tag_axis,
     )
 
@@ -214,7 +220,10 @@ def main() -> None:
         for i, tag in enumerate(unique_tags):
             mask = (mesh.face_right == -1) & (mesh.boundary_tags == tag)
             segs = [
-                [mesh.nodes[mesh.face_nodes[fi, 0]], mesh.nodes[mesh.face_nodes[fi, 1]]]
+                [
+                    mesh.nodes[mesh.face_nodes[fi, 0]],
+                    mesh.nodes[mesh.face_nodes[fi, 1]],
+                ]
                 for fi in np.where(mask)[0]
             ]
             color = "red" if tag == -1 else cmap(i / max(len(unique_tags), 1))
@@ -237,13 +246,11 @@ def main() -> None:
         plt.show()
         return
 
-    eq_manager = equation_manager_utils.build_equation_manager(
-        mesh,
+    eq_manager = EquationManager(
         species=species,
         collision_integrals=collision_integrals,
         reactions=reactions,
         numerics_config=numerics_config,
-        boundary_config=boundary_config,
         transport_model=build_transport_model_from_config(
             TransportModelConfig(model=args.transport),
             species_table=species,
@@ -251,7 +258,9 @@ def main() -> None:
             casseau_transport=casseau_transport,
         ),
         casseau_transport=casseau_transport,
+        boundary_arrays=build_boundary_arrays_2d(mesh, tag_to_bc, species),
     )
+    build_and_register_legacy_2d_equation_manager(mesh, eq_manager, tag_to_bc)
 
     # Initialize freestream everywhere (thermally relaxed: Tv = T)
     n_cells = mesh.cell_areas.shape[0]
@@ -262,7 +271,7 @@ def main() -> None:
     T = jnp.full((n_cells,), T_inf)
     Tv = jnp.full((n_cells,), T_inf)
 
-    U_init = equation_manager_utils.compute_U_from_primitives(
+    U_init = compute_U_from_primitives(
         Y_s=Y,
         rho=rho,
         u=u,
@@ -276,15 +285,13 @@ def main() -> None:
         print("NaN debug: running one step with jax_debug_nans=True ...")
         jax.config.update("jax_debug_nans", True)
         with jax.disable_jit():
-            U_debug = equation_manager.advance_one_step(
-                U_init, mesh, eq_manager, args.dt
-            )
+            U_debug = advance_one_step(U_init, mesh, eq_manager, args.dt)
         U_debug.block_until_ready()
         print("Step completed without NaN — initial condition looks clean.")
         jax.config.update("jax_debug_nans", False)
         return
 
-    U_hist, t_hist = equation_manager.run_scan(
+    U_hist, t_hist = run_scan(
         U_init,
         mesh,
         eq_manager,

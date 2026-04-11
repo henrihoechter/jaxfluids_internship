@@ -117,7 +117,6 @@ numerics_config = numerics_types.NumericsConfig2D(
     integrator_scheme="rk2",
     spatial_scheme="first_order",
     flux_scheme="hllc",
-    axisymmetric=False,
     clipping=numerics_types.ClippingConfig2D(),
 )
 

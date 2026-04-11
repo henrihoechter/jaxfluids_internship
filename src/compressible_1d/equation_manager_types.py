@@ -33,7 +33,7 @@ class EquationManager:
 
     numerics_config: numerics_types.NumericsConfig
 
-    boundary_condition: Literal["periodic", "reflective", "transmissive"] = (
+    boundary_condition: Literal["periodic", "reflective", "outflow"] = (
         dataclasses.field(metadata=dict(static=True))
     )
     transport_model: TransportModel | None = dataclasses.field(

@@ -80,7 +80,7 @@ def compute_source_terms(
     # Q_ion = compute_electron_impact_ionization_loss(U, equation_manager)
 
     # Total source for vibrational-electronic energy (last variable = ρE_v)
-    S = S.at[:, n_species + 3].set(Q_TV + Q_VV + Q_eT + Q_ion + Q_vib_chem)
+    S = S.at[:, n_variables - 1].set(Q_TV + Q_VV + Q_eT + Q_ion + Q_vib_chem)
 
     return S
 

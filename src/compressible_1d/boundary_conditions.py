@@ -2,6 +2,7 @@
 
 Handles boundary conditions with shape convention (n_cells, n_variables).
 """
+
 import jax.numpy as jnp
 from jaxtyping import Float, Array
 
@@ -19,7 +20,7 @@ def apply_boundary_conditions(
 
     Args:
         U: Conserved state [n_cells, n_variables]
-        boundary_condition_type: 'periodic', 'transmissive', or 'reflective'
+        boundary_condition_type: 'periodic', 'outflow', or 'reflective'
         n_ghosts: Number of ghost cells per side
 
     Returns:
@@ -41,7 +42,7 @@ def apply_boundary_conditions(
         right_ghost = U[:n_ghosts, :]  # First n_ghosts cells
         U_with_ghosts = jnp.concatenate([left_ghost, U, right_ghost], axis=0)
 
-    elif boundary_condition_type == "transmissive":
+    elif boundary_condition_type == "outflow":
         # Left ghost: extrapolate from left boundary (zero gradient)
         # Right ghost: extrapolate from right boundary (zero gradient)
         left_ghost = U[:n_ghosts, :]  # Copy first cell

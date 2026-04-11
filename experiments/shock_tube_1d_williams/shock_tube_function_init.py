@@ -2,7 +2,7 @@
 
 This script builds a 1D shock tube using user-defined functions for each primitive
 variable (e.g., rho(x), u(x), p(x), Y_s(x)). It prepares U_init for the
-compressible_1d equation_manager and optionally runs the solver + plots.
+unified compressible equation manager and optionally runs the solver + plots.
 
 Notes:
 - Primitives here are (Y_s, rho, u, T, Tv). You may specify either p(x) or T(x).
@@ -19,14 +19,19 @@ from typing import Callable, Sequence
 import jax
 import jax.numpy as jnp
 
-from compressible_core import chemistry_utils, constants, energy_models
-from compressible_1d import (
-    equation_manager,
-    equation_manager_types,
-    equation_manager_utils,
-    numerics_types,
-    solver,
+from compressible import (
+    ClippingConfig,
+    EquationManager,
+    Mesh,
+    NumericsConfig,
+    build_boundary_arrays_1d,
+    build_boundary_arrays_1d_periodic,
+    compute_U_from_primitives,
+    compute_cfl_dt as compute_cfl_dt_unified,
+    extract_primitives_from_U,
+    run,
 )
+from compressible_core import chemistry_utils, constants, energy_models
 
 try:
     import plotly.graph_objects as go
@@ -60,10 +65,11 @@ def make_piecewise_fn(
     return fn
 
 
-def build_grid(n_cells: int, length: float) -> tuple[jnp.ndarray, float]:
+def build_grid(n_cells: int, length: float) -> tuple[jnp.ndarray, jnp.ndarray, float]:
     dx = length / n_cells
     x = jnp.linspace(0.5 * dx, length - 0.5 * dx, n_cells)
-    return x, dx
+    x_nodes = jnp.linspace(0.0, length, n_cells + 1)
+    return x, x_nodes, dx
 
 
 def load_species_table(species_names: Sequence[str]) -> chemistry_utils.SpeciesTable:
@@ -87,26 +93,38 @@ def load_species_table(species_names: Sequence[str]) -> chemistry_utils.SpeciesT
 
 def build_equation_manager(
     species_table,
-    dx: float,
+    mesh: Mesh,
     dt: float,
-    boundary_condition: str = "transmissive",
-) -> equation_manager_types.EquationManager:
-    numerics_config = numerics_types.NumericsConfig(
+    boundary_condition: str = "outflow",
+) -> EquationManager:
+    numerics_config = NumericsConfig(
         dt=dt,
-        dx=dx,
+        cfl=0.4,
+        dt_mode="fixed",
         integrator_scheme="rk2",
         spatial_scheme="first_order",
         flux_scheme="hllc",
-        n_halo_cells=1,
-        clipping=numerics_types.ClippingConfig(),
+        clipping=ClippingConfig(),
     )
 
-    return equation_manager_types.EquationManager(
+    if boundary_condition == "periodic":
+        boundary_arrays = build_boundary_arrays_1d_periodic(
+            mesh, species_table.n_species
+        )
+    else:
+        boundary_arrays = build_boundary_arrays_1d(
+            mesh,
+            bc_left=boundary_condition,
+            bc_right=boundary_condition,
+            n_species=species_table.n_species,
+        )
+
+    return EquationManager(
         species=species_table,
         collision_integrals=None,
         reactions=None,
         numerics_config=numerics_config,
-        boundary_condition=boundary_condition,
+        boundary_arrays=boundary_arrays,
     )
 
 
@@ -166,16 +184,15 @@ def build_initial_state(
 
 def compute_cfl_dt(
     U_init: jnp.ndarray,
-    eq_manager: equation_manager_types.EquationManager,
+    mesh: Mesh,
+    eq_manager: EquationManager,
     cfl: float = 0.4,
 ) -> float:
-    Y, rho, T, Tv, p = equation_manager_utils.extract_primitives_from_U(
-        U_init, eq_manager
+    eq_manager_cfl = replace(
+        eq_manager,
+        numerics_config=replace(eq_manager.numerics_config, cfl=cfl),
     )
-    n_species = eq_manager.species.n_species
-    u = U_init[:, n_species] / rho
-    a = solver.compute_speed_of_sound(rho, p, Y, T, Tv, eq_manager)
-    return float(cfl * eq_manager.numerics_config.dx / jnp.max(jnp.abs(u) + a))
+    return compute_cfl_dt_unified(U_init, mesh, eq_manager_cfl)
 
 
 def plot_primitives_slices(
@@ -237,14 +254,18 @@ def main():
     Tv_R = None
     Y_R = jnp.array([1.0])
 
-    boundary_condition = "transmissive"  # transmissive, reflective, periodic
+    boundary_condition = "outflow"  # outflow, reflective, periodic
     t_final = 1e-4
     save_interval = 20
     cfl = 0.4
     run_simulation = True
     # --- user input end ---
 
-    x, dx = build_grid(n_cells, tube_length)
+    x, x_nodes, dx = build_grid(n_cells, tube_length)
+    mesh = Mesh.from_1d_grid(
+        x_nodes,
+        periodic=boundary_condition == "periodic",
+    )
 
     species_table = load_species_table(species_names)
 
@@ -279,16 +300,22 @@ def main():
 
     eq_manager = build_equation_manager(
         species_table=species_table,
-        dx=dx,
+        mesh=mesh,
         dt=1e-8,
         boundary_condition=boundary_condition,
     )
 
-    U_init = equation_manager_utils.compute_U_from_primitives(
-        Y_s=Y, rho=rho, u=u, T_tr=T, T_V=Tv, equation_manager=eq_manager
+    U_init = compute_U_from_primitives(
+        Y_s=Y,
+        rho=rho,
+        u=u,
+        v=jnp.zeros_like(u),
+        T_tr=T,
+        T_V=Tv,
+        equation_manager=eq_manager,
     )
 
-    dt = compute_cfl_dt(U_init, eq_manager, cfl=cfl)
+    dt = compute_cfl_dt(U_init, mesh, eq_manager, cfl=cfl)
     eq_manager = replace(
         eq_manager, numerics_config=replace(eq_manager.numerics_config, dt=dt)
     )
@@ -314,8 +341,9 @@ def main():
         )
         return
 
-    U_hist, t_hist = equation_manager.run(
+    U_hist, t_hist = run(
         U_init=U_init,
+        mesh=mesh,
         equation_manager=eq_manager,
         t_final=t_final,
         save_interval=save_interval,
@@ -327,17 +355,15 @@ def main():
 
     primitive_slices = []
     for idx in indices:
-        Y_i, rho_i, T_i, Tv_i, p_i = equation_manager_utils.extract_primitives_from_U(
-            U_hist[idx], eq_manager
-        )
+        primitives = extract_primitives_from_U(U_hist[idx], eq_manager)
         primitive_slices.append(
             {
                 "label": f"t={float(t_hist[idx]):.2e}s",
-                "rho": rho_i,
-                "u": U_hist[idx][:, eq_manager.species.n_species] / rho_i,
-                "p": p_i,
-                "T": T_i,
-                "Tv": Tv_i,
+                "rho": primitives.rho,
+                "u": primitives.u,
+                "p": primitives.p,
+                "T": primitives.T,
+                "Tv": primitives.Tv,
             }
         )
 

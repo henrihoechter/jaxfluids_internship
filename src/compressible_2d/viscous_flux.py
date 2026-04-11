@@ -1,4 +1,4 @@
-"""Viscous flux computation for 2D axisymmetric two-temperature NSF."""
+"""Viscous flux computation for the 2D two-temperature NSF solver."""
 
 from __future__ import annotations
 
@@ -114,9 +114,7 @@ def compute_viscous_flux_faces(
 
     # Transport properties at cells
     mu, eta_t, eta_r, eta_v, D_s = (
-        equation_manager.transport_model.compute_transport_properties(
-            T, Tv, p, Y, rho
-        )
+        equation_manager.transport_model.compute_transport_properties(T, Tv, p, Y, rho)
     )
 
     # Face primitives (include boundary ghost states via U_R)

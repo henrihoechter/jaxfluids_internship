@@ -29,7 +29,9 @@ class ClippingConfig:
     rho_s_max: float = 1e10
     rho_u_min: float = -1e10  # Momentum
     rho_u_max: float = 1e10
-    rho_E_min: float = 1e3  # Total energy per volume
+    # Total energy can be negative in the reference-offset formulation used by
+    # this solver, so clipping to a positive minimum injects energy.
+    rho_E_min: float = -1e12  # Total energy per volume
     rho_E_max: float = 1e12
     rho_Ev_min: float = 0.0  # Vibrational energy per volume
     rho_Ev_max: float = 1e12

@@ -1,4 +1,4 @@
-"""2D axisymmetric compressible flow solver."""
+"""2D compressible flow solver."""
 
 from .mesh_gmsh import Mesh2D, read_gmsh
 from .equation_manager_types import EquationManager2D, BoundaryConditionConfig2D

@@ -119,7 +119,6 @@ def make_equation_manager(
         integrator_scheme="rk2",
         spatial_scheme="muscl",
         flux_scheme="hllc",
-        axisymmetric=False,
         clipping=numerics_types.ClippingConfig2D(),
     )
 
@@ -298,14 +297,12 @@ def extract_thermal_conductivity_profile_from_U(case, U, x_target=None):
     prim = equation_manager_utils.extract_primitives(U, eq_manager)
     if eq_manager.transport_model is None:
         raise ValueError("Transport model is required to extract conductivity.")
-    _, eta_t, eta_r, eta_v, _ = (
-        eq_manager.transport_model.compute_transport_properties(
-            T=prim.T,
-            T_v=prim.Tv,
-            p=prim.p,
-            Y_s=prim.Y_s,
-            rho=prim.rho,
-        )
+    _, eta_t, eta_r, eta_v, _ = eq_manager.transport_model.compute_transport_properties(
+        T=prim.T,
+        T_v=prim.Tv,
+        p=prim.p,
+        Y_s=prim.Y_s,
+        rho=prim.rho,
     )
 
     eta_tr = np.asarray(eta_t + eta_r)

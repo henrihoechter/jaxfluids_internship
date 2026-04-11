@@ -203,8 +203,8 @@ def compute_physical_flux_normal(
     rho_s = U[:, :n_species]
     rho_u_n = U[:, n_species]
     rho_u_t = U[:, n_species + 1]
-    rho_E = U[:, n_species + 2]
-    rho_Ev = U[:, n_species + 3]
+    rho_E = U[:, n_vars - 2]
+    rho_Ev = U[:, n_vars - 1]
 
     rho = jnp.sum(rho_s, axis=1)
     u_n = rho_u_n / rho
@@ -214,8 +214,8 @@ def compute_physical_flux_normal(
     F = F.at[:, :n_species].set(rho_s * u_n[:, None])
     F = F.at[:, n_species].set(rho_u_n * u_n + p)
     F = F.at[:, n_species + 1].set(rho_u_n * u_t)
-    F = F.at[:, n_species + 2].set((rho_E + p) * u_n)
-    F = F.at[:, n_species + 3].set(rho_Ev * u_n)
+    F = F.at[:, n_vars - 2].set((rho_E + p) * u_n)
+    F = F.at[:, n_vars - 1].set(rho_Ev * u_n)
 
     return F
 
@@ -233,10 +233,11 @@ def compute_star_state_normal(
 
     rho_star = rho * (S - u_n) / (S - S_star + 1e-14)
 
+    n_vars = U.shape[1]
     rho_s = U[:, :n_species]
     rho_u_t = U[:, n_species + 1]
-    rho_E = U[:, n_species + 2]
-    rho_Ev = U[:, n_species + 3]
+    rho_E = U[:, n_vars - 2]
+    rho_Ev = U[:, n_vars - 1]
 
     U_star = jnp.zeros_like(U)
     factor = ((S - u_n) / (S - S_star + 1e-14))[:, None]
@@ -248,10 +249,10 @@ def compute_star_state_normal(
     rho_E_star = factor[:, 0] * (
         rho_E + (S_star - u_n) * (rho_star * S_star + p_star_term)
     )
-    U_star = U_star.at[:, n_species + 2].set(rho_E_star)
+    U_star = U_star.at[:, n_vars - 2].set(rho_E_star)
 
     rho_Ev_star = (rho_star / rho) * rho_Ev
-    U_star = U_star.at[:, n_species + 3].set(rho_Ev_star)
+    U_star = U_star.at[:, n_vars - 1].set(rho_Ev_star)
 
     return U_star
 

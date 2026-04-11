@@ -26,14 +26,22 @@ import jax.numpy as jnp
 
 jax.config.update("jax_enable_x64", False)
 
-from compressible_core import chemistry_utils, energy_models
-from compressible_2d import (
-    mesh_gmsh,
-    equation_manager,
-    equation_manager_types,
-    equation_manager_utils,
-    numerics_types,
+from compressible import (
+    ClippingConfig,
+    EquationManager,
+    Mesh,
+    NumericsConfig,
+    advance_one_step,
+    build_boundary_arrays_2d,
+    compute_U_from_primitives,
+    register_legacy_2d_equation_manager,
 )
+from compressible_2d import equation_manager_types as legacy_eq_types_2d
+from compressible_2d import numerics_types as legacy_num_types_2d
+from compressible_2d.boundary_conditions_utils import (
+    build_boundary_arrays as build_boundary_arrays_2d_legacy,
+)
+from compressible_core import chemistry_utils, energy_models
 
 # ---- same constants as the notebook ----
 T_inf = 300.0
@@ -57,7 +65,7 @@ t_final = 1e-5
 data_dir = repo_root / "data"
 print("Loading mesh ...", flush=True)
 t0 = time.perf_counter()
-mesh = mesh_gmsh.read_gmsh_v2_wedge_plane(
+mesh = Mesh.from_gmsh_wedge(
     str(data_dir / "bluntedCone.msh"),
     wedge_plane_tag=4,
     remap_tags={7: TAG_AXISYMMETRIC},
@@ -78,51 +86,69 @@ species = chemistry_utils.load_species_table(
 )
 
 # ---- equation manager ----
-numerics_config = numerics_types.NumericsConfig2D(
+numerics_config = NumericsConfig(
     dt=dt,
     cfl=0.4,
     dt_mode="fixed",
     integrator_scheme="rk2",
-    spatial_scheme="muscl",
+    spatial_scheme="first_order",
     flux_scheme="hllc",
-    axisymmetric=True,
-    clipping=numerics_types.ClippingConfig2D(),
+    clipping=ClippingConfig(),
 )
-boundary_config = equation_manager_types.BoundaryConditionConfig2D(
-    tag_to_bc={
-        TAG_INFLOW: {
-            "type": "inflow",
-            "rho": rho_inf,
-            "u": 0.0,
-            "v": V_inf,
-            "T": T_inf,
-            "Tv": T_inf,
-            "Y": [1.0],
-        },
-        TAG_OUTFLOW: {"type": "outflow"},
-        TAG_WALL: {"type": "wall", "Tw": T_inf},
-        TAG_AXISYMMETRIC: {"type": "axisymmetric"},
-    }
-)
-eq_manager = equation_manager_utils.build_equation_manager(
-    mesh,
+tag_to_bc = {
+    TAG_INFLOW: {
+        "type": "inflow",
+        "rho": rho_inf,
+        "u": 0.0,
+        "v": V_inf,
+        "T": T_inf,
+        "Tv": T_inf,
+        "Y": [1.0],
+    },
+    TAG_OUTFLOW: {"type": "outflow"},
+    TAG_WALL: {"type": "wall", "Tw": T_inf},
+    TAG_AXISYMMETRIC: {"type": "wall_euler"},
+}
+eq_manager = EquationManager(
     species=species,
     collision_integrals=None,
     reactions=None,
     numerics_config=numerics_config,
-    boundary_config=boundary_config,
     transport_model=None,
     casseau_transport=None,
+    boundary_arrays=build_boundary_arrays_2d(mesh, tag_to_bc, species),
 )
+if mesh.legacy_mesh2d is not None:
+    legacy_eq_manager = legacy_eq_types_2d.EquationManager2D(
+        species=species,
+        collision_integrals=None,
+        reactions=None,
+        numerics_config=legacy_num_types_2d.NumericsConfig2D(
+            dt=numerics_config.dt,
+            cfl=numerics_config.cfl,
+            dt_mode=numerics_config.dt_mode,
+            integrator_scheme=numerics_config.integrator_scheme,
+            spatial_scheme="first_order",
+            flux_scheme="hllc",
+        ),
+        boundary_arrays=build_boundary_arrays_2d_legacy(
+            mesh.legacy_mesh2d,
+            legacy_eq_types_2d.BoundaryConditionConfig2D(tag_to_bc=tag_to_bc),
+            species,
+        ),
+        transport_model=None,
+        casseau_transport=None,
+    )
+    register_legacy_2d_equation_manager(eq_manager, legacy_eq_manager)
 
 # JIT-compiled step: mesh and eq_manager are passed as pytree arguments so
 # their arrays are abstract during tracing (no XLA constant-folding of the
 # 120k-element connectivity arrays).
-jit_step = jax.jit(equation_manager.advance_one_step)
+jit_step = jax.jit(advance_one_step)
 
 # ---- initial condition ----
 n_cells = mesh.cell_areas.shape[0]
-U = equation_manager_utils.compute_U_from_primitives(
+U = compute_U_from_primitives(
     Y_s=jnp.ones((n_cells, 1)),
     rho=jnp.full((n_cells,), rho_inf),
     u=jnp.zeros((n_cells,)),

@@ -1,4 +1,4 @@
-"""Equation manager for 2D axisymmetric multi-species solver."""
+"""Equation manager for 2D multi-species solver."""
 
 from __future__ import annotations
 
@@ -20,10 +20,10 @@ from . import viscous_flux
 from . import source_terms
 
 
-def _face_weights(mesh: Mesh2D, axisymmetric: bool) -> tuple[jnp.ndarray, jnp.ndarray]:
+def _face_weights(mesh: Mesh2D) -> tuple[jnp.ndarray, jnp.ndarray]:
     face_areas = jnp.asarray(mesh.face_areas)
     cell_areas = jnp.asarray(mesh.cell_areas)
-    if axisymmetric:
+    if mesh.axisymmetric:
         face_r = jnp.asarray(mesh.face_r)
         cell_r = jnp.asarray(mesh.cell_r)
         face_w = face_areas * (2.0 * math.pi * face_r)
@@ -42,7 +42,7 @@ def compute_divergence(
 ) -> Float[Array, "n_cells n_variables"]:
     face_left = jnp.asarray(mesh.face_left)
     face_right = jnp.asarray(mesh.face_right)
-    face_w, cell_w = _face_weights(mesh, equation_manager.numerics_config.axisymmetric)
+    face_w, cell_w = _face_weights(mesh)
 
     flux = F * face_w[:, None]
     n_cells = mesh.cell_areas.shape[0]
@@ -86,7 +86,7 @@ def compute_cfl_dt(
 
     lam = jnp.maximum(jnp.abs(u_n_L) + a_L, jnp.abs(u_n_R) + a_R)
 
-    face_w, cell_w = _face_weights(mesh, equation_manager.numerics_config.axisymmetric)
+    face_w, cell_w = _face_weights(mesh)
 
     face_left = jnp.asarray(mesh.face_left)
     face_right = jnp.asarray(mesh.face_right)

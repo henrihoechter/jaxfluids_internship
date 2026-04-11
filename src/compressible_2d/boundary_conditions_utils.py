@@ -11,7 +11,6 @@ from .equation_manager_types import BoundaryConditionArrays2D, BoundaryCondition
 from .boundary_conditions_types import (
     BC_OUTFLOW,
     BC_INFLOW,
-    BC_AXISYMMETRIC,
     BC_WALL,
     BC_WALL_SLIP,
     BC_WALL_EULER,
@@ -74,8 +73,6 @@ def _build_boundary_arrays(
             if Y.ndim != 1 or Y.shape[0] != n_species:
                 raise ValueError("Inflow Y must have shape (n_species,)")
             inflow_Y[mask, :] = Y[None, :]
-        elif bc_type == "axisymmetric":
-            bc_id[mask] = BC_AXISYMMETRIC
         elif bc_type == "wall":
             bc_id[mask] = BC_WALL
             if "Tw" in bc:

@@ -87,8 +87,8 @@ def compute_physical_flux(
 
     rho_species = U[:, :n_species]
     rho_u = U[:, n_species]
-    rho_E = U[:, n_species + 1]
-    rho_Ev = U[:, n_species + 2]
+    rho_E = U[:, n_variables - 2]
+    rho_Ev = U[:, n_variables - 1]
 
     rho = jnp.sum(rho_species, axis=1)
     u = rho_u / rho
@@ -96,8 +96,8 @@ def compute_physical_flux(
     F = jnp.zeros((n_cells, n_variables))
     F = F.at[:, :n_species].set(rho_species * u[:, None])
     F = F.at[:, n_species].set(rho_u * u + p)
-    F = F.at[:, n_species + 1].set((rho_E + p) * u)
-    F = F.at[:, n_species + 2].set(rho_Ev * u)
+    F = F.at[:, n_variables - 2].set((rho_E + p) * u)
+    F = F.at[:, n_variables - 1].set(rho_Ev * u)
     return F
 
 
@@ -206,9 +206,10 @@ def _hllc_star_state(
 
     rho_star = rho * (S - u) / (S - S_star + 1e-14)
 
+    n_variables = U.shape[1]
     rho_species = U[:, :n_species]
-    rho_E = U[:, n_species + 1]
-    rho_Ev = U[:, n_species + 2]
+    rho_E = U[:, n_variables - 2]
+    rho_Ev = U[:, n_variables - 1]
 
     U_star = jnp.zeros_like(U)
 
@@ -220,10 +221,10 @@ def _hllc_star_state(
     rho_E_star = factor[:, 0] * (
         rho_E + (S_star - u) * (rho_star * S_star + p_star_term)
     )
-    U_star = U_star.at[:, n_species + 1].set(rho_E_star)
+    U_star = U_star.at[:, n_variables - 2].set(rho_E_star)
 
     rho_Ev_star = (rho_star / rho) * rho_Ev
-    U_star = U_star.at[:, n_species + 2].set(rho_Ev_star)
+    U_star = U_star.at[:, n_variables - 1].set(rho_Ev_star)
 
     return U_star
 
@@ -299,8 +300,9 @@ def compute_exact_riemann_flux(
     c_s = jnp.where(is_left_contact[:, None], c_s_L, c_s_R)
 
     # Specific vibrational energy (per unit mass): ev = rho*Ev / rho
-    ev_L = U_L[:, n_species + 2] / (rho_L + 1e-14)
-    ev_R = U_R[:, n_species + 2] / (rho_R + 1e-14)
+    n_variables = U_L.shape[1]
+    ev_L = U_L[:, n_variables - 1] / (rho_L + 1e-14)
+    ev_R = U_R[:, n_variables - 1] / (rho_R + 1e-14)
     ev_s = jnp.where(is_left_contact, ev_L, ev_R)
 
     # Reconstruct volumetric vibrational energy and total energy at interface.
@@ -331,8 +333,8 @@ def compute_exact_riemann_flux(
     F = jnp.zeros((n_interfaces, n_variables))
     F = F.at[:, :n_species].set(rho_s[:, None] * c_s * u_s[:, None])
     F = F.at[:, n_species].set(rho_s * u_s**2 + p_s)
-    F = F.at[:, n_species + 1].set((rho_E_s + p_s) * u_s)
-    F = F.at[:, n_species + 2].set(rho_Ev_s * u_s)
+    F = F.at[:, n_variables - 2].set((rho_E_s + p_s) * u_s)
+    F = F.at[:, n_variables - 1].set(rho_Ev_s * u_s)
 
     return F
 

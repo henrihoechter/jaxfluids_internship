@@ -1,4 +1,4 @@
-"""Boundary conditions for 2D axisymmetric solver."""
+"""Boundary conditions for the 2D compressible solver."""
 
 import jax
 import jax.numpy as jnp
@@ -7,7 +7,6 @@ from jaxtyping import Array, Float
 from compressible_core import constants, thermodynamic_relations
 
 from .boundary_conditions_types import (
-    BC_AXISYMMETRIC,
     BC_INFLOW,
     BC_WALL,
     BC_WALL_SLIP,
@@ -133,39 +132,6 @@ def _ghost_inflow(
         v=boundary_arrays.inflow_v,
         T_tr=boundary_arrays.inflow_T,
         T_V=boundary_arrays.inflow_Tv,
-        equation_manager=equation_manager,
-    )
-
-
-def _ghost_axisymmetric(
-    U_L: Float[Array, "n_faces n_variables"],
-    n_hat: Float[Array, "n_faces 2"],
-    equation_manager: EquationManager2D,
-) -> Float[Array, "n_faces n_variables"]:
-    Y_L, rho_L, u_L, v_L, T_L, Tv_L, _ = (
-        equation_manager_utils.extract_primitives_from_U(U_L, equation_manager)
-    )
-
-    n_x = n_hat[:, 0]
-    n_y = n_hat[:, 1]
-    t_x = -n_y
-    t_y = n_x
-
-    u_n = u_L * n_x + v_L * n_y
-    u_t = u_L * t_x + v_L * t_y
-
-    u_n_g = -u_n
-    u_t_g = u_t
-    u_g = u_n_g * n_x + u_t_g * t_x
-    v_g = u_n_g * n_y + u_t_g * t_y
-
-    return equation_manager_utils.compute_U_from_primitives(
-        Y_s=Y_L,
-        rho=rho_L,
-        u=u_g,
-        v=v_g,
-        T_tr=T_L,
-        T_V=Tv_L,
         equation_manager=equation_manager,
     )
 
@@ -301,19 +267,16 @@ def compute_face_states(
     n_hat = jnp.asarray(mesh.face_normals)
 
     U_R_inflow = _ghost_inflow(bc, equation_manager)
-    U_R_axis = _ghost_axisymmetric(U_L, n_hat, equation_manager)
     U_R_wall = _ghost_wall(U_L, bc, bc_id, equation_manager)
     U_R_wall_slip = _ghost_wall_slip(U_L, bc, bc_id, n_hat, equation_manager)
     U_R_wall_euler = _ghost_wall_euler(U_L, n_hat, equation_manager)
 
     mask_inflow = bc_id == BC_INFLOW
-    mask_axis = bc_id == BC_AXISYMMETRIC
     mask_wall = bc_id == BC_WALL
     mask_wall_slip = bc_id == BC_WALL_SLIP
     mask_wall_euler = bc_id == BC_WALL_EULER
 
     U_R = jnp.where(mask_inflow[:, None], U_R_inflow, U_R)
-    U_R = jnp.where(mask_axis[:, None], U_R_axis, U_R)
     U_R = jnp.where(mask_wall[:, None], U_R_wall, U_R)
     U_R = jnp.where(mask_wall_slip[:, None], U_R_wall_slip, U_R)
     U_R = jnp.where(mask_wall_euler[:, None], U_R_wall_euler, U_R)
@@ -360,22 +323,6 @@ def compute_ghost_state(
             v=v,
             T_tr=T,
             T_V=Tv,
-            equation_manager=equation_manager,
-        )
-
-    if bc_type == "axisymmetric":
-        # Reflect normal velocity, keep tangential
-        u_n_g = -u_n
-        u_t_g = u_t
-        u_g = u_n_g * n_x + u_t_g * t_x
-        v_g = u_n_g * n_y + u_t_g * t_y
-        return equation_manager_utils.compute_U_from_primitives(
-            Y_s=Y_L,
-            rho=rho_L,
-            u=u_g,
-            v=v_g,
-            T_tr=T_L,
-            T_V=Tv_L,
             equation_manager=equation_manager,
         )
 

@@ -25,6 +25,7 @@ class Mesh2D:
     boundary_tags: np.ndarray  # (n_faces,) tag or -1
     cell_r: np.ndarray  # (n_cells,) radius coordinate (r)
     face_r: np.ndarray  # (n_faces,) radius coordinate (r)
+    axisymmetric: bool = False
 
     @staticmethod
     def _polygon_area_centroid(points: np.ndarray) -> tuple[float, np.ndarray]:
@@ -141,6 +142,7 @@ class Mesh2D:
             boundary_tags=boundary_tags_arr,
             cell_r=cell_r,
             face_r=face_r,
+            axisymmetric=False,
         )
 
 
@@ -165,10 +167,10 @@ def _mesh2d_flatten(mesh):
         mesh.cell_r,
         mesh.face_r,
     ]
-    return leaves, None  # cells not included; aux_data=None is hashable
+    return leaves, mesh.axisymmetric  # cells not included; bool aux_data is hashable
 
 
-def _mesh2d_unflatten(aux_data, leaves):
+def _mesh2d_unflatten(axisymmetric, leaves):
     (
         nodes,
         cell_centroids,
@@ -197,6 +199,7 @@ def _mesh2d_unflatten(aux_data, leaves):
         boundary_tags=boundary_tags,
         cell_r=cell_r,
         face_r=face_r,
+        axisymmetric=axisymmetric,
     )
 
 
@@ -372,33 +375,34 @@ def read_gmsh_v2_wedge_plane(
     boundary_edges = [(n1, n2, tag) for (n1, n2), tag in edge_tag_map.items()]
 
     mesh = Mesh2D.from_cells(nodes, cells, boundary_edges)
+    tags_arr = mesh.boundary_tags
 
     # Geometric axis fallback: any face where both endpoint y-coords <= axis_tol
     # gets overwritten with axis_tag.
     if axis_tag is not None:
-        tags_arr = mesh.boundary_tags.copy()
+        tags_arr = tags_arr.copy()
         fn = mesh.face_nodes
         for fi in range(len(tags_arr)):
             n1, n2 = fn[fi, 0], fn[fi, 1]
             if node_y[n1] <= axis_tol and node_y[n2] <= axis_tol:
                 tags_arr[fi] = axis_tag
-        mesh = Mesh2D(
-            nodes=mesh.nodes,
-            cells=mesh.cells,
-            cell_centroids=mesh.cell_centroids,
-            cell_areas=mesh.cell_areas,
-            face_nodes=mesh.face_nodes,
-            face_left=mesh.face_left,
-            face_right=mesh.face_right,
-            face_normals=mesh.face_normals,
-            face_areas=mesh.face_areas,
-            face_centroids=mesh.face_centroids,
-            boundary_tags=tags_arr,
-            cell_r=mesh.cell_r,
-            face_r=mesh.face_r,
-        )
 
-    return mesh
+    return Mesh2D(
+        nodes=mesh.nodes,
+        cells=mesh.cells,
+        cell_centroids=mesh.cell_centroids,
+        cell_areas=mesh.cell_areas,
+        face_nodes=mesh.face_nodes,
+        face_left=mesh.face_left,
+        face_right=mesh.face_right,
+        face_normals=mesh.face_normals,
+        face_areas=mesh.face_areas,
+        face_centroids=mesh.face_centroids,
+        boundary_tags=tags_arr,
+        cell_r=mesh.cell_r,
+        face_r=mesh.face_r,
+        axisymmetric=True,
+    )
 
 
 def _read_gmsh_v4(lines: list[str]) -> Mesh2D:

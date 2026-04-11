@@ -27,7 +27,9 @@ class ClippingConfig2D:
     rho_u_max: float = 1e10
     rho_v_min: float = -1e10
     rho_v_max: float = 1e10
-    rho_E_min: float = 1e3
+    # Total energy can be negative in the reference-offset formulation used by
+    # this solver, so clipping to a positive minimum injects energy.
+    rho_E_min: float = -1e12
     rho_E_max: float = 1e12
     rho_Ev_min: float = 0.0
     rho_Ev_max: float = 1e12
@@ -52,5 +54,4 @@ class NumericsConfig2D:
         default="first_order", metadata=dict(static=True)
     )
     flux_scheme: Literal["hllc"] = field(default="hllc", metadata=dict(static=True))
-    axisymmetric: bool = field(default=True, metadata=dict(static=True))
     clipping: ClippingConfig2D = field(default_factory=ClippingConfig2D)
