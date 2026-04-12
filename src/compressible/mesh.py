@@ -1,13 +1,4 @@
-"""Unified Mesh dataclass for 1D and 2D compressible solvers.
-
-A 1D structured grid is represented as a degenerate unstructured mesh:
-  - Face normals are [±1, 0]
-  - face_left / face_right encode the regular 1D connectivity
-  - cell_areas = dx, face_areas = 1.0, cell_r = face_r = 1.0
-
-This allows all solver kernels (divergence, BC dispatch, CFL) to operate
-without any dimension-specific branching.
-"""
+"""Mesh containers and mesh-loading helpers for the solver."""
 
 from __future__ import annotations
 
@@ -21,30 +12,13 @@ import numpy as np
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Mesh:
-    """Unified mesh representation for 1D and 2D FV solver.
-
-    All solver-facing arrays (connectivity, normals, areas, radii, MUSCL
-    stencil) are stored here. The ``cells``, ``nodes``, and ``face_nodes``
-    fields are construction-time or plotting metadata and are not used by any
-    solver kernel.
-
-    Connectivity convention:
-        face_left[f]  : index of the cell to the left of face f  (≥ 0)
-        face_right[f] : index of the cell to the right of face f
-                        -1 means the face is a boundary face
-
-    MUSCL stencil:
-        muscl_ll[f] : "far-left" cell index for reconstruction at face f
-                      -1 if the stencil is unavailable (boundary or unstructured)
-        muscl_rr[f] : "far-right" cell index (-1 if unavailable)
-        Set to all -1 by from_gmsh; populated by from_1d_grid.
-    """
+    """Store the mesh arrays used by the solver."""
 
     # Construction-time / plotting metadata (not used by solver kernels)
     nodes: np.ndarray  # (n_nodes, 2)
     cells: list[np.ndarray]
     face_nodes: np.ndarray  # (n_faces, 2)
-    legacy_mesh2d: object | None  # original compressible_2d mesh when available
+    legacy_mesh2d: object | None  # original compressible_2d_ mesh when available
 
     # Cell data
     cell_centroids: np.ndarray  # (n_cells, 2)
@@ -65,10 +39,6 @@ class Mesh:
     muscl_rr: np.ndarray  # (n_faces,) "far-right" cell index
     axisymmetric: bool = False
 
-    # ------------------------------------------------------------------ #
-    # Factory: 1D structured grid                                         #
-    # ------------------------------------------------------------------ #
-
     @classmethod
     def from_1d_grid(
         cls,
@@ -85,16 +55,14 @@ class Mesh:
             bc_right_tag: Physical tag assigned to the right boundary face.
             periodic: If True, wrap connectivity so face 0 connects to the
                 last cell and the last face connects back to cell 0.
-                Periodic meshes have no boundary faces (face_right ≥ 0 always).
+                Periodic meshes have no boundary faces (face_right >= 0 always).
         """
         x_coords = np.asarray(x_coords, dtype=float)
         n_cells = len(x_coords) - 1
         n_faces = n_cells + 1 if not periodic else n_cells
 
-        # --- Nodes (embedded in 2D at y = 0) ---
         nodes = np.column_stack([x_coords, np.zeros(len(x_coords))])
 
-        # --- Cell geometry ---
         dx = np.diff(x_coords)
         cell_centroids = np.column_stack(
             [0.5 * (x_coords[:-1] + x_coords[1:]), np.zeros(n_cells)]
@@ -102,7 +70,6 @@ class Mesh:
         cell_areas = dx
         cell_r = np.ones(n_cells)
 
-        # --- Face geometry ---
         if not periodic:
             # Interfaces: x_coords[0], x_coords[1], ..., x_coords[n_cells]
             face_x = x_coords
@@ -114,7 +81,6 @@ class Mesh:
         face_areas = np.ones(n_faces)
         face_r = np.ones(n_faces)
 
-        # --- Face normals ---
         # Convention: outward normal from face_left cell toward face_right.
         # For 1D: all faces point in +x direction except the left boundary face
         # which points in -x (outward from cell 0).
@@ -125,7 +91,6 @@ class Mesh:
         else:
             face_normals[:, 0] = 1.0  # all: +x direction
 
-        # --- Connectivity ---
         if not periodic:
             # face 0: left BC (face_left=0, face_right=-1)
             # face i (1..n_cells-1): interior (face_left=i-1, face_right=i)
@@ -139,11 +104,10 @@ class Mesh:
             face_left[n_cells] = n_cells - 1
             face_right[n_cells] = -1
         else:
-            # face i connects cell (i-1) % n_cells → cell i
+            # face i connects cell (i-1) % n_cells -> cell i
             face_left = (np.arange(n_faces, dtype=np.int32) - 1) % n_cells
             face_right = np.arange(n_faces, dtype=np.int32)
 
-        # --- MUSCL stencil ---
         # muscl_ll[f] = face_left[f] - 1 (or -1 at left boundary)
         # muscl_rr[f] = face_right[f] + 1 (or -1 at right boundary)
         muscl_ll = np.full(n_faces, -1, dtype=np.int32)
@@ -163,7 +127,6 @@ class Mesh:
             muscl_ll = (np.arange(n_faces, dtype=np.int32) - 2) % n_cells
             muscl_rr = (np.arange(n_faces, dtype=np.int32) + 1) % n_cells
 
-        # --- Boundary tags ---
         boundary_tags = np.full(n_faces, -1, dtype=np.int32)
         if not periodic:
             boundary_tags[0] = bc_left_tag
@@ -188,10 +151,6 @@ class Mesh:
             muscl_rr=muscl_rr,
             axisymmetric=False,
         )
-
-    # ------------------------------------------------------------------ #
-    # Factory: unstructured 2D mesh (from Gmsh or from_cells)             #
-    # ------------------------------------------------------------------ #
 
     @classmethod
     def from_cells(
@@ -321,7 +280,7 @@ class Mesh:
         axis_tol: float = 1e-10,
     ) -> "Mesh":
         """Read a thin-wedge 3D Gmsh v2 mesh and extract the 2D cross-section."""
-        from compressible_2d.mesh_gmsh import read_gmsh_v2_wedge_plane
+        from compressible_2d_.mesh_gmsh import read_gmsh_v2_wedge_plane
 
         mesh2d = read_gmsh_v2_wedge_plane(
             path,
@@ -333,8 +292,8 @@ class Mesh:
         return _mesh2d_to_mesh(mesh2d)
 
 
-def _mesh2d_to_mesh(m) -> Mesh:
-    """Convert a compressible_2d.Mesh2D to the unified Mesh."""
+def _mesh2d_to_mesh(m: object) -> Mesh:
+    """Convert a legacy 2D mesh to the unified mesh format."""
     n_faces = m.face_left.shape[0]
     muscl_ll = np.full(n_faces, -1, dtype=np.int32)
     muscl_rr = np.full(n_faces, -1, dtype=np.int32)
@@ -360,6 +319,7 @@ def _mesh2d_to_mesh(m) -> Mesh:
 
 
 def _polygon_area_centroid(points: np.ndarray) -> tuple[float, np.ndarray]:
+    """Compute the area and centroid of a polygon."""
     x = points[:, 0]
     y = points[:, 1]
     shift_x = np.roll(x, -1)
@@ -375,19 +335,15 @@ def _polygon_area_centroid(points: np.ndarray) -> tuple[float, np.ndarray]:
 
 
 def _read_gmsh(path: str | Path) -> Mesh:
-    from compressible_2d.mesh_gmsh import read_gmsh
+    """Read a Gmsh file into the unified mesh format."""
+    from compressible_2d_.mesh_gmsh import read_gmsh
 
     mesh2d = read_gmsh(path)
     return _mesh2d_to_mesh(mesh2d)
 
 
-# ---------------------------------------------------------------------------
-# JAX pytree registration
-# Cells / face nodes are excluded from dynamic leaves (not used in solver kernels).
-# ---------------------------------------------------------------------------
-
-
-def _mesh_flatten(mesh: Mesh):
+def _mesh_flatten(mesh: Mesh) -> tuple[list[np.ndarray], bool]:
+    """Flatten a mesh for JAX pytree registration."""
     leaves = [
         mesh.nodes,
         mesh.cell_centroids,
@@ -406,7 +362,8 @@ def _mesh_flatten(mesh: Mesh):
     return leaves, mesh.axisymmetric
 
 
-def _mesh_unflatten(axisymmetric, leaves):
+def _mesh_unflatten(axisymmetric: bool, leaves: list[np.ndarray]) -> Mesh:
+    """Rebuild a mesh from JAX pytree leaves."""
     (
         nodes,
         cell_centroids,

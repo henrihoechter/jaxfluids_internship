@@ -1,36 +1,27 @@
-"""Unified equation manager: run() and advance_one_step() for all dimensions.
-
-The same implementation handles 1D and 2D.  The only difference is the Mesh
-object passed in: use Mesh.from_1d_grid() for 1D problems and
-Mesh.from_gmsh() / Mesh.from_cells() for 2D problems.
-"""
+"""Time-stepping helpers for the unified compressible solver."""
 
 from __future__ import annotations
 
 import math
-from typing import Tuple
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array, Float
 
-from compressible.mesh import Mesh
-from compressible.equation_manager_types import EquationManager
-from compressible import boundary_conditions
-from compressible import solver
-from compressible import source_terms
-from compressible import state as state_module
-from compressible import viscous_flux
+from .mesh import Mesh
+from .equation_manager_types import EquationManager
+from . import boundary_conditions
+from . import solver
+from . import source_terms
+from . import state as state_module
+from . import viscous_flux
 
 
-# ---------------------------------------------------------------------------
-# Geometry helpers
-# ---------------------------------------------------------------------------
-
-
-def _face_weights(mesh: Mesh) -> tuple[jnp.ndarray, jnp.ndarray]:
-    """Return (face_w, cell_w): face and cell metric weights for the divergence."""
+def _face_weights(
+    mesh: Mesh,
+) -> tuple[Float[Array, "n_faces"], Float[Array, "n_cells"]]:
+    """Return the face and cell metric weights."""
     face_areas = jnp.asarray(mesh.face_areas)
     cell_areas = jnp.asarray(mesh.cell_areas)
     if mesh.axisymmetric:
@@ -43,26 +34,13 @@ def _face_weights(mesh: Mesh) -> tuple[jnp.ndarray, jnp.ndarray]:
         cell_w = cell_areas
     return face_w, cell_w
 
-
-# ---------------------------------------------------------------------------
-# Core operators
-# ---------------------------------------------------------------------------
-
-
 @jax.named_call
 def compute_divergence(
     F: Float[Array, "n_faces n_variables"],
     mesh: Mesh,
     equation_manager: EquationManager,
 ) -> Float[Array, "n_cells n_variables"]:
-    """Scatter-add divergence of face flux F.
-
-    For each cell i:
-        dU/dt += -1/V_i * Σ_{faces of i} F_f * A_f  (outward normal convention)
-
-    Works identically for 1D (degenerate normals) and 2D (arbitrary normals).
-    Boundary faces (face_right < 0) contribute only to the left cell.
-    """
+    """Scatter the face fluxes into a cell-centered divergence."""
     face_left = jnp.asarray(mesh.face_left)
     face_right = jnp.asarray(mesh.face_right)
     face_w, cell_w = _face_weights(mesh)
@@ -89,7 +67,7 @@ def compute_cfl_dt(
     mesh: Mesh,
     equation_manager: EquationManager,
 ) -> float:
-    """CFL-adaptive time step: dt = CFL * min(V_i / Σ_f (|u_n| + a) * A_f)."""
+    """Compute the CFL-limited time step."""
     U_L, U_R = boundary_conditions.compute_face_states(U, mesh, equation_manager)
     n_hat = jnp.asarray(mesh.face_normals)
 
@@ -130,7 +108,7 @@ def _compute_dU_dt(
     mesh: Mesh,
     equation_manager: EquationManager,
 ) -> Float[Array, "n_cells n_variables"]:
-    """Convective + diffusive dU/dt (without source terms)."""
+    """Compute the convective and diffusive contribution to dU/dt."""
     spatial_scheme = equation_manager.numerics_config.spatial_scheme
     if spatial_scheme == "muscl":
         U_L, U_R = solver.compute_face_states_muscl(U, mesh, equation_manager)
@@ -167,24 +145,12 @@ def _compute_dU_dt(
 
     return dU_dt
 
-
-# ---------------------------------------------------------------------------
-# Time integration
-# ---------------------------------------------------------------------------
-
-
 @jax.named_call
 def _clip_conserved_state(
     U: Float[Array, "n_cells n_variables"],
     equation_manager: EquationManager,
 ) -> Float[Array, "n_cells n_variables"]:
-    """Clip conserved variables before they are reused by another sub-step.
-
-    Chemistry and MUSCL reconstruction can produce nonphysical intermediate
-    states within a Strang-split update. Clipping only at the end of the full
-    step is too late because primitive recovery for the next sub-step already
-    depends on these values.
-    """
+    """Clip the conserved state before it is reused."""
     n_species = equation_manager.species.n_species
     clip = equation_manager.numerics_config.clipping
 
@@ -213,13 +179,7 @@ def advance_one_step(
     equation_manager: EquationManager,
     dt: float | None = None,
 ) -> Float[Array, "n_cells n_variables"]:
-    """Advance by one time step using Strang operator splitting.
-
-    Splitting: source(dt/2) → [convection + diffusion](dt) → source(dt/2).
-
-    The convection+diffusion sub-step uses either forward-Euler or RK2
-    (midpoint method), controlled by numerics_config.integrator_scheme.
-    """
+    """Advance the solution by one time step."""
     if dt is None:
         if equation_manager.numerics_config.dt_mode == "cfl":
             dt = compute_cfl_dt(U, mesh, equation_manager)
@@ -247,18 +207,13 @@ def advance_one_step(
     U = U + 0.5 * dt * S
     return _clip_conserved_state(U, equation_manager)
 
-
-# ---------------------------------------------------------------------------
-# Simulation runners
-# ---------------------------------------------------------------------------
-
-
 def _check_muscl(mesh: Mesh, equation_manager: EquationManager) -> None:
+    """Check that MUSCL was requested on a mesh with a valid stencil."""
     if equation_manager.numerics_config.spatial_scheme == "muscl":
         if np.all(np.asarray(mesh.muscl_ll) < 0):
             raise ValueError(
                 "spatial_scheme='muscl' requires a structured mesh built with "
-                "Mesh.from_1d_grid().  The provided mesh has no MUSCL stencil."
+                "Mesh.from_1d_grid(). The provided mesh has no MUSCL stencil."
             )
 
 
@@ -270,14 +225,14 @@ def run(
     save_interval: int = 100,
     history_device: str = "device",
     dt_array: Float[Array, "n_steps"] | None = None,
-) -> Tuple[
+) -> tuple[
     Float[Array, "n_snapshots n_cells n_variables"],
     Float[Array, "n_snapshots"],
 ]:
-    """Run simulation to t_final.
+    """Run the solver loop until the requested final time.
 
     Args:
-        U_init: Initial condition [n_cells, n_variables].
+        U_init: Initial condition.
         mesh: Unified Mesh (1D or 2D).
         equation_manager: Physics and numerics configuration.
         t_final: Final simulation time [s].
@@ -286,7 +241,7 @@ def run(
         dt_array: Optional explicit per-step dt sequence (overrides t_final).
 
     Returns:
-        (U_history, t_history): Snapshots and corresponding times.
+        Tuple of (U_history, t_history): solution snapshots and corresponding times.
     """
     _check_muscl(mesh, equation_manager)
 
@@ -362,11 +317,11 @@ def run_scan(
     t_final: float,
     save_interval: int = 100,
     dt_array: Float[Array, "n_steps"] | None = None,
-) -> Tuple[
+) -> tuple[
     Float[Array, "n_snapshots n_cells n_variables"],
     Float[Array, "n_snapshots"],
 ]:
-    """Run simulation using jax.lax.scan (fixed dt only, fully JIT-compiled).
+    """Run the solver loop with `jax.lax.scan`.
 
     Raises:
         ValueError: If dt_mode is not 'fixed'.

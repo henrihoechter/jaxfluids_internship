@@ -36,12 +36,12 @@ from compressible import (
     compute_U_from_primitives,
     register_legacy_2d_equation_manager,
 )
-from compressible_2d import equation_manager_types as legacy_eq_types_2d
-from compressible_2d import numerics_types as legacy_num_types_2d
-from compressible_2d.boundary_conditions_utils import (
+from compressible_2d_ import equation_manager_types as legacy_eq_types_2d
+from compressible_2d_ import numerics_types as legacy_num_types_2d
+from compressible_2d_.boundary_conditions_utils import (
     build_boundary_arrays as build_boundary_arrays_2d_legacy,
 )
-from compressible_core import chemistry_utils, energy_models
+from compressible import chemistry_utils, energy_models
 
 # ---- same constants as the notebook ----
 T_inf = 300.0

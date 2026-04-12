@@ -1,11 +1,6 @@
-"""Unified state representation for the compressible solver.
+"""State conversion helpers for the compressible solver."""
 
-State vector: U = [rho_1, ..., rho_ns, rho*u, rho*v, rho*E, rho*E_v]
-              shape: (n_cells, n_species + 4)
-
-For 1D problems, rho*v = 0 everywhere by construction.  All solver kernels
-operate on this n+4 layout; no dimension-specific branching is needed.
-"""
+from __future__ import annotations
 
 from typing import NamedTuple
 
@@ -13,23 +8,20 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from compressible_core import constants, thermodynamic_relations
-from compressible.equation_manager_types import EquationManager
+from . import constants, thermodynamic_relations
+from .equation_manager_types import EquationManager
 
 
 class Primitives(NamedTuple):
-    """Primitive variables extracted from the conserved state.
+    """Primitive variables extracted from the conserved state."""
 
-    For 1D simulations, v is always zero.
-    """
-
-    Y_s: Array  # Mole fractions          (n_cells, n_species)
-    rho: Array  # Total density            (n_cells,)
-    u: Array  # x-velocity               (n_cells,)
-    v: Array  # y-velocity (0 for 1D)    (n_cells,)
-    T: Array  # Translational temperature (n_cells,)
-    Tv: Array  # Vibrational temperature   (n_cells,)
-    p: Array  # Pressure                  (n_cells,)
+    Y_s: Float[Array, "n_cells n_species"]
+    rho: Float[Array, "n_cells"]
+    u: Float[Array, "n_cells"]
+    v: Float[Array, "n_cells"]
+    T: Float[Array, "n_cells"]
+    Tv: Float[Array, "n_cells"]
+    p: Float[Array, "n_cells"]
 
 
 @jax.named_call
@@ -37,18 +29,7 @@ def extract_primitives_from_U(
     U: Float[Array, "n_cells n_variables"],
     equation_manager: EquationManager,
 ) -> Primitives:
-    """Extract primitive variables from conserved state.
-
-    State vector layout: [rho_s..., rho*u, rho*v, rho*E, rho*E_v]
-    n_variables = n_species + 4 (rho*v = 0 for 1D)
-
-    Args:
-        U: Conserved state [n_cells, n_variables]
-        equation_manager: Contains species table and clipping config.
-
-    Returns:
-        Primitives namedtuple with Y_s, rho, u, v, T, Tv, p.
-    """
+    """Extract primitive variables from the conserved state."""
     n_species = equation_manager.species.n_species
 
     rho_s = U[:, :n_species]
@@ -125,24 +106,20 @@ def extract_primitives(
     U: Float[Array, "n_cells n_variables"],
     equation_manager: EquationManager,
 ) -> Primitives:
-    """Alias for extract_primitives_from_U."""
+    """Call `extract_primitives_from_U`."""
     return extract_primitives_from_U(U, equation_manager)
 
 
 def compute_U_from_primitives(
     Y_s: Float[Array, "n_cells n_species"],
-    rho: Float[Array, " n_cells"],
-    u: Float[Array, " n_cells"],
-    v: Float[Array, " n_cells"],
-    T_tr: Float[Array, " n_cells"],
-    T_V: Float[Array, " n_cells"],
+    rho: Float[Array, "n_cells"],
+    u: Float[Array, "n_cells"],
+    v: Float[Array, "n_cells"],
+    T_tr: Float[Array, "n_cells"],
+    T_V: Float[Array, "n_cells"],
     equation_manager: EquationManager,
 ) -> Float[Array, "n_cells n_variables"]:
-    """Compute conserved state from primitives.
-
-    Returns U = [rho_s..., rho*u, rho*v, rho*E, rho*E_v] of shape
-    (n_cells, n_species + 4).  For 1D, pass v=0.
-    """
+    """Build the conserved state from primitive variables."""
     n_species = equation_manager.species.n_species
     M_s = equation_manager.species.M_s
     n_cells = rho.shape[0]

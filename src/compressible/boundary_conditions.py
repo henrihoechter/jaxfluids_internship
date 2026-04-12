@@ -1,33 +1,20 @@
-"""Unified boundary conditions for the compressible solver.
-
-All BC types dispatch via jnp.where masks — no Python-level if/elif inside
-any JAX-traced function.  Works identically for 1D (degenerate normals) and
-2D (arbitrary normals).
-
-BC types (from boundary_conditions_types.py):
-    BC_OUTFLOW (0)     — zero-gradient / outflow
-    BC_INFLOW (1)      — prescribed conserved state
-    BC_WALL (3)        — no-slip isothermal
-    BC_WALL_SLIP (4)   — Maxwell/Smoluchowski slip
-    BC_WALL_EULER (5)  — inviscid slip (Euler) / symmetry / axis
-    BC_REFLECTIVE (6)  — reflect normal momentum (1D reflective BC)
-"""
+"""Boundary-condition state builders for the compressible solver."""
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float
+from jaxtyping import Array, Float, Int
 
-from compressible_core import constants, thermodynamic_relations
-from compressible.boundary_conditions_types import (
+from . import constants, thermodynamic_relations
+from .boundary_conditions_types import (
     BC_INFLOW,
     BC_REFLECTIVE,
     BC_WALL,
     BC_WALL_EULER,
     BC_WALL_SLIP,
 )
-from compressible.equation_manager_types import BoundaryConditionArrays, EquationManager
-from compressible.mesh import Mesh
-from compressible import state as state_module
+from .equation_manager_types import BoundaryConditionArrays, EquationManager
+from .mesh import Mesh
+from . import state as state_module
 
 
 def compute_slip_wall_ghost(
@@ -43,7 +30,7 @@ def compute_slip_wall_ghost(
     sigma_t: Float[Array, "n_faces"],
     sigma_v: Float[Array, "n_faces"],
 ) -> Float[Array, "n_faces n_variables"]:
-    """Ghost state for Maxwell/Smoluchowski slip wall."""
+    """Build slip-wall ghost states."""
     prim = state_module.extract_primitives_from_U(U_L, equation_manager)
     Y_L, rho_L, u_L, v_L, T_L, Tv_L, p_L = prim
 
@@ -125,6 +112,7 @@ def _ghost_inflow(
     bc: BoundaryConditionArrays,
     equation_manager: EquationManager,
 ) -> Float[Array, "n_faces n_variables"]:
+    """Build inflow ghost states from boundary data."""
     return state_module.compute_U_from_primitives(
         Y_s=bc.inflow_Y,
         rho=bc.inflow_rho,
@@ -141,7 +129,7 @@ def _ghost_reflective(
     n_hat: Float[Array, "n_faces 2"],
     equation_manager: EquationManager,
 ) -> Float[Array, "n_faces n_variables"]:
-    """Reflect the conserved normal momentum and preserve energy exactly."""
+    """Reflect the normal momentum while preserving the other entries."""
     n_species = equation_manager.species.n_species
     n_x = n_hat[:, 0]
     n_y = n_hat[:, 1]
@@ -160,7 +148,7 @@ def _ghost_wall_euler(
     n_hat: Float[Array, "n_faces 2"],
     equation_manager: EquationManager,
 ) -> Float[Array, "n_faces n_variables"]:
-    """Euler (inviscid) slip wall: reflect only normal velocity."""
+    """Build Euler wall ghost states by reflecting the normal velocity."""
     prim = state_module.extract_primitives_from_U(U_L, equation_manager)
     Y_L, rho_L, u_L, v_L, T_L, Tv_L, _ = prim
     n_x = n_hat[:, 0]
@@ -185,9 +173,10 @@ def _ghost_wall_euler(
 def _ghost_wall(
     U_L: Float[Array, "n_faces n_variables"],
     bc: BoundaryConditionArrays,
-    bc_id: Array,
+    bc_id: Int[Array, "n_faces"],
     equation_manager: EquationManager,
 ) -> Float[Array, "n_faces n_variables"]:
+    """Build no-slip wall ghost states."""
     prim = state_module.extract_primitives_from_U(U_L, equation_manager)
     Y_L, rho_L, u_L, v_L, T_L, Tv_L, _ = prim
 
@@ -221,10 +210,11 @@ def _ghost_wall(
 def _ghost_wall_slip(
     U_L: Float[Array, "n_faces n_variables"],
     bc: BoundaryConditionArrays,
-    bc_id: Array,
+    bc_id: Int[Array, "n_faces"],
     n_hat: Float[Array, "n_faces 2"],
     equation_manager: EquationManager,
 ) -> Float[Array, "n_faces n_variables"]:
+    """Build slip-wall ghost states with wall data defaults."""
     prim = state_module.extract_primitives_from_U(U_L, equation_manager)
     Y_L, rho_L, u_L, v_L, T_L, Tv_L, _ = prim
 
@@ -259,13 +249,7 @@ def compute_face_states(
     mesh: Mesh,
     equation_manager: EquationManager,
 ) -> tuple[Float[Array, "n_faces n_variables"], Float[Array, "n_faces n_variables"]]:
-    """Compute left and right states at every face.
-
-    Interior faces: direct gather from cell state.
-    Boundary faces (face_right == -1): apply BC ghost state.
-
-    The BC dispatch uses jnp.where masks (no Python branching inside trace).
-    """
+    """Build the left and right states at every face."""
     face_left = jnp.asarray(mesh.face_left)
     face_right = jnp.asarray(mesh.face_right)
 

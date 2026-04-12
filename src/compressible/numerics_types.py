@@ -8,7 +8,7 @@ import jax
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True, slots=True)
 class ClippingConfig:
-    """Clipping limits for primitive and conserved variables."""
+    """Store clipping limits for primitive and conserved variables."""
 
     # Primitive variables
     rho_min: float = 1e-10
@@ -44,14 +44,14 @@ class ClippingConfig:
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True, slots=True)
 class NumericsConfig:
-    """Unified numerics config. Superset of NumericsConfig (1D) and NumericsConfig2D.
+    """Store the numerical settings used by the solver.
 
     All Literal/bool fields are static (metadata=dict(static=True)) so JAX JIT
-    compiles a separate kernel for each distinct configuration — 1D and 2D cases
+    compiles a separate kernel for each distinct configuration - 1D and 2D cases
     will always produce different compiled kernels.
 
     Args:
-        dt: Fixed timestep (None → use CFL-adaptive stepping).
+        dt: Fixed timestep. Use `None` for CFL stepping.
         cfl: CFL number used when dt is None.
         dt_mode: "fixed" or "cfl".
         integrator_scheme: "forward-euler" or "rk2".

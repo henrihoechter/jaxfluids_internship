@@ -1,14 +1,11 @@
-"""Helpers for building BoundaryConditionArrays.
-
-Provides factory functions for 1D and 2D boundary condition setup.
-"""
+"""Helpers for building boundary-condition arrays."""
 
 from __future__ import annotations
 
 import numpy as np
 import jax.numpy as jnp
 
-from compressible_core import chemistry_types
+from . import chemistry_types
 from compressible.mesh import Mesh
 from compressible.equation_manager_types import BoundaryConditionArrays
 from compressible.boundary_conditions_types import (
@@ -21,8 +18,8 @@ from compressible.boundary_conditions_types import (
 )
 
 
-def _empty_bc_arrays(n_faces: int, n_species: int) -> dict:
-    """Create numpy arrays with sensible defaults."""
+def _empty_bc_arrays(n_faces: int, n_species: int) -> dict[str, np.ndarray]:
+    """Create boundary-condition arrays with default values."""
     return dict(
         bc_id=np.full(n_faces, -1, dtype=np.int32),
         inflow_rho=np.ones(n_faces),
@@ -45,7 +42,8 @@ def _empty_bc_arrays(n_faces: int, n_species: int) -> dict:
     )
 
 
-def _finalize(d: dict) -> BoundaryConditionArrays:
+def _finalize(d: dict[str, np.ndarray]) -> BoundaryConditionArrays:
+    """Convert numpy boundary arrays to JAX arrays."""
     return BoundaryConditionArrays(
         bc_id=jnp.asarray(d["bc_id"]),
         inflow_rho=jnp.asarray(d["inflow_rho"]),
@@ -79,9 +77,9 @@ def build_boundary_arrays_1d(
     """Build BoundaryConditionArrays for a 1D mesh.
 
     Maps 1D BC names to the unified BC system:
-        "outflow"       → BC_OUTFLOW
-        "reflective"    → BC_REFLECTIVE
-        "inflow"        → BC_INFLOW  (requires inflow_left / inflow_right dict)
+        "outflow" -> BC_OUTFLOW
+        "reflective" -> BC_REFLECTIVE
+        "inflow" -> BC_INFLOW
 
     Periodic 1D meshes do not have boundary faces (Mesh.from_1d_grid with
     periodic=True); call build_boundary_arrays_1d_periodic() instead.
@@ -165,7 +163,7 @@ def build_boundary_arrays_2d(
 
     Args:
         mesh: 2D mesh built with Mesh.from_cells() or Mesh.from_gmsh().
-        tag_to_bc: Mapping from boundary tag → BC config dict.
+        tag_to_bc: Mapping from boundary tag to the BC config dict.
             Each dict must have "type" key with one of:
             "outflow", "inflow", "wall", "wall_slip", "wall_euler".
             Use "wall_euler" for inviscid slip, symmetry, and axis boundaries.

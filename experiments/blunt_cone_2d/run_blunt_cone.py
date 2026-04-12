@@ -20,12 +20,10 @@ from compressible import (
     compute_U_from_primitives,
     run_scan,
 )
-from compressible_core import chemistry_utils, energy_models
-from compressible_core import transport_model_casseau_utils as transport_casseau
-from compressible_core import transport_model_gnoffo_utils as transport_core
-from compressible_core import chemistry
-from compressible_core.transport_models_types import TransportModelConfig
-from compressible_core.transport_models_utils import build_transport_model_from_config
+from compressible import chemistry_utils, energy_models
+from compressible import chemistry
+from compressible.transport_models_types import TransportModelConfig
+from compressible.transport_models_utils import build_transport_model_from_config
 
 
 def load_species_table(species_names: tuple[str, ...]) -> chemistry_utils.SpeciesTable:
@@ -122,18 +120,18 @@ def main() -> None:
             args.reactions, species, chemistry.ChemistryModelConfig()
         )
 
-    collision_integrals = None
-    if args.collision_integrals:
-        collision_integrals = transport_core.create_collision_integral_table_from_json(
-            args.collision_integrals
-        )
-
-    casseau_transport = None
-    if args.transport == "casseau":
+    transport_config = None
+    if args.transport is not None:
         repo_root = Path(__file__).resolve().parents[2]
         data_dir = repo_root / "data"
-        casseau_transport = transport_casseau.load_casseau_transport_table(
-            data_dir / "air_5_casseau_transport.json", species_names
+        transport_config = TransportModelConfig(
+            model=args.transport,
+            collision_integrals_path=args.collision_integrals,
+            casseau_data_path=(
+                str(data_dir / "air_5_casseau_transport.json")
+                if args.transport == "casseau"
+                else None
+            ),
         )
 
     numerics_config = NumericsConfig(
@@ -258,16 +256,16 @@ def main() -> None:
 
     eq_manager = EquationManager(
         species=species,
-        collision_integrals=collision_integrals,
         reactions=reactions,
         numerics_config=numerics_config,
-        transport_model=build_transport_model_from_config(
-            TransportModelConfig(model=args.transport),
-            species_table=species,
-            collision_integrals=collision_integrals,
-            casseau_transport=casseau_transport,
+        transport_model=(
+            build_transport_model_from_config(
+                transport_config,
+                species_table=species,
+            )
+            if transport_config is not None
+            else None
         ),
-        casseau_transport=casseau_transport,
         boundary_arrays=build_boundary_arrays_2d(mesh, tag_to_bc, species),
     )
     build_and_register_legacy_2d_equation_manager(mesh, eq_manager, tag_to_bc)

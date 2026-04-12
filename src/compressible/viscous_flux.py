@@ -1,22 +1,20 @@
-"""Viscous flux computation for two-temperature Navier-Stokes-Fourier equations.
-
-Uses Green-Gauss cell-gradient reconstruction on the unified Mesh.  For a 1D
-mesh, the face normals are [±1, 0] and the computation reduces to standard
-central differences — no dimension-specific branches are needed.
-"""
+"""Viscous-flux helpers for the compressible solver."""
 
 from __future__ import annotations
 
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from compressible.mesh import Mesh
-from compressible.equation_manager_types import EquationManager
-from compressible import state as state_module
-from compressible_core import thermodynamic_relations
+from .mesh import Mesh
+from .equation_manager_types import EquationManager
+from . import state as state_module
+from . import thermodynamic_relations
 
 
-def _face_avg(phi_L: jnp.ndarray, phi_R: jnp.ndarray) -> jnp.ndarray:
+def _face_avg(
+    phi_L: Float[Array, "n_faces ..."], phi_R: Float[Array, "n_faces ..."]
+) -> Float[Array, "n_faces ..."]:
+    """Average left and right face data."""
     return 0.5 * (phi_L + phi_R)
 
 
@@ -92,17 +90,17 @@ def compute_viscous_flux_faces(
     Returns zeros if transport_model is None (inviscid).
 
     Args:
-        U: Cell-centered conserved state [n_cells, n_variables].
-        U_L: Left face states (with ghost BCs applied) [n_faces, n_variables].
-        U_R: Right face states (with ghost BCs applied) [n_faces, n_variables].
+        U: Cell-centered conserved state.
+        U_L: Left face states (with ghost BCs applied).
+        U_R: Right face states (with ghost BCs applied).
         mesh: Unified Mesh (1D or 2D).
-        equation_manager: Contains transport_model and species data.
-        cell_primitives: Pre-extracted cell primitives (optional).
-        face_primitives_L / _R: Pre-extracted face primitives (optional).
+        equation_manager: Physics and numerics configuration.
+        cell_primitives: Pre-extracted cell primitives (computed if None).
+        face_primitives_L: Pre-extracted left face primitives (computed if None).
+        face_primitives_R: Pre-extracted right face primitives (computed if None).
 
     Returns:
-        F_v: Viscous flux [n_faces, n_variables] in *Cartesian* coordinates.
-             For 1D, only the x-components are non-zero.
+        Viscous flux in Cartesian coordinates.
     """
     n_species = equation_manager.species.n_species
     if equation_manager.transport_model is None:

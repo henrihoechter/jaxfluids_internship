@@ -1,15 +1,4 @@
-"""Unified flux computation for the compressible solver.
-
-All flux schemes (HLLC, exact Riemann, Lax-Friedrichs) work on the unified
-n+4 state vector [rho_s..., rho*u, rho*v, rho*E, rho*Ev] and arbitrary face
-normals.  For a 1D mesh, face normals are [±1, 0] and the rotation reduces
-to the identity.
-
-Entry points:
-    compute_flux_faces(U_L, U_R, n_hat, em)  — numerical flux at every face
-    compute_face_states(U, mesh, em)          — first-order face states
-    compute_face_states_muscl(U, mesh, em)    — MUSCL face states
-"""
+"""Flux and reconstruction helpers for the compressible solver."""
 
 from __future__ import annotations
 
@@ -17,15 +6,10 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from compressible_core import thermodynamic_relations
-from compressible.equation_manager_types import EquationManager
-from compressible.mesh import Mesh
-from compressible import state as state_module
-
-
-# ---------------------------------------------------------------------------
-# Speed of sound
-# ---------------------------------------------------------------------------
+from . import thermodynamic_relations
+from .equation_manager_types import EquationManager
+from .mesh import Mesh
+from . import state as state_module
 
 
 def compute_speed_of_sound(
@@ -36,10 +20,7 @@ def compute_speed_of_sound(
     Tv: Float[Array, "n"],
     equation_manager: EquationManager,
 ) -> Float[Array, "n"]:
-    """Frozen speed of sound: a = sqrt(gamma_frozen * p / rho).
-
-    gamma_frozen = cp_tr / cv_tr (vibrational modes frozen).
-    """
+    """Compute the frozen speed of sound."""
     cp = thermodynamic_relations.compute_cp(T, equation_manager.species)
     cv_tr = thermodynamic_relations.compute_cv_tr(T, equation_manager.species)
 
@@ -52,26 +33,12 @@ def compute_speed_of_sound(
     gamma_frozen = cp_mix / (cv_tr_mix + 1e-14)
     return jnp.sqrt(gamma_frozen * p / (rho + 1e-14))
 
-
-# ---------------------------------------------------------------------------
-# Normal-frame physical flux
-# ---------------------------------------------------------------------------
-
-
 def _compute_physical_flux_normal(
     U: Float[Array, "n_faces n_vars"],
     p: Float[Array, "n_faces"],
     equation_manager: EquationManager,
 ) -> Float[Array, "n_faces n_vars"]:
-    """Physical flux in the rotated normal frame.
-
-    State layout (rotated): [rho_s..., rho*u_n, rho*u_t, rho*E, rho*Ev]
-    Flux: F_species = rho_s * u_n
-          F_mom_n   = rho*u_n*u_n + p
-          F_mom_t   = rho*u_n*u_t       (tangential: advected by normal velocity)
-          F_energy  = (rho*E + p) * u_n
-          F_Ev      = rho*Ev * u_n
-    """
+    """Compute the physical flux in the face-normal frame."""
     n_species = equation_manager.species.n_species
     n_faces, n_vars = U.shape
 
@@ -92,12 +59,6 @@ def _compute_physical_flux_normal(
     F = F.at[:, n_vars - 1].set(rho_Ev * u_n)
     return F
 
-
-# ---------------------------------------------------------------------------
-# HLLC in the normal frame
-# ---------------------------------------------------------------------------
-
-
 def _hllc_star_state_normal(
     U: Float[Array, "n n_vars"],
     S: Float[Array, "n"],
@@ -106,7 +67,7 @@ def _hllc_star_state_normal(
     rho: Float[Array, "n"],
     u_n: Float[Array, "n"],
 ) -> Float[Array, "n n_vars"]:
-    """HLLC star state in the normal frame (n+4 layout)."""
+    """Compute the HLLC star state in the normal frame."""
     n_vars = U.shape[1]
     rho_star = rho * (S - u_n) / (S - S_star + 1e-14)
     factor = ((S - u_n) / (S - S_star + 1e-14))[:, None]
@@ -137,7 +98,7 @@ def _hllc_flux_normal(
     p_R: Float[Array, "n_faces"],
     equation_manager: EquationManager,
 ) -> Float[Array, "n_faces n_vars"]:
-    """HLLC flux in the face-normal frame."""
+    """Compute the HLLC flux in the face-normal frame."""
     n_species = equation_manager.species.n_species
     rho_L = jnp.sum(U_Ln[:, :n_species], axis=1)
     rho_R = jnp.sum(U_Rn[:, :n_species], axis=1)
@@ -187,12 +148,6 @@ def _hllc_flux_normal(
 
     return F
 
-
-# ---------------------------------------------------------------------------
-# Exact Riemann solver in the normal frame
-# ---------------------------------------------------------------------------
-
-
 def _exact_pressure_function(
     p_star: Float[Array, "n"],
     p_k: Float[Array, "n"],
@@ -200,7 +155,7 @@ def _exact_pressure_function(
     a_k: Float[Array, "n"],
     gamma: Float[Array, "n"],
 ) -> tuple[Float[Array, "n"], Float[Array, "n"]]:
-    """Pressure function f_k(p*) and derivative (Toro Chapter 4)."""
+    """Compute the exact-Riemann pressure function and its derivative."""
     A_k = 2.0 / ((gamma + 1.0) * rho_k + 1e-14)
     B_k = (gamma - 1.0) / (gamma + 1.0) * p_k
     sq = jnp.sqrt(A_k / (p_star + B_k + 1e-14))
@@ -216,8 +171,18 @@ def _exact_pressure_function(
     return jnp.where(is_shock, f_shock, f_rare), jnp.where(is_shock, df_shock, df_rare)
 
 
-def _exact_solve_star_state(rho_L, u_L, p_L, a_L, rho_R, u_R, p_R, a_R, gamma):
-    """Newton-Raphson for p* and u* (Toro eq. 4.88)."""
+def _exact_solve_star_state(
+    rho_L: Float[Array, "n"],
+    u_L: Float[Array, "n"],
+    p_L: Float[Array, "n"],
+    a_L: Float[Array, "n"],
+    rho_R: Float[Array, "n"],
+    u_R: Float[Array, "n"],
+    p_R: Float[Array, "n"],
+    a_R: Float[Array, "n"],
+    gamma: Float[Array, "n"],
+) -> tuple[Float[Array, "n"], Float[Array, "n"]]:
+    """Solve for the star pressure and velocity."""
     du = u_R - u_L
     p_0 = jnp.maximum(
         0.5 * (p_L + p_R) - 0.125 * du * (rho_L + rho_R) * (a_L + a_R),
@@ -237,9 +202,19 @@ def _exact_solve_star_state(rho_L, u_L, p_L, a_L, rho_R, u_R, p_R, a_R, gamma):
 
 
 def _exact_sample_at_interface(
-    rho_L, u_L, p_L, a_L, rho_R, u_R, p_R, a_R, p_star, u_star, gamma
-):
-    """Sample the exact Riemann solution at xi = x/t = 0 (Toro Chapter 4)."""
+    rho_L: Float[Array, "n"],
+    u_L: Float[Array, "n"],
+    p_L: Float[Array, "n"],
+    a_L: Float[Array, "n"],
+    rho_R: Float[Array, "n"],
+    u_R: Float[Array, "n"],
+    p_R: Float[Array, "n"],
+    a_R: Float[Array, "n"],
+    p_star: Float[Array, "n"],
+    u_star: Float[Array, "n"],
+    gamma: Float[Array, "n"],
+) -> tuple[Float[Array, "n"], Float[Array, "n"], Float[Array, "n"]]:
+    """Sample the exact Riemann solution at the interface."""
     mu2 = (gamma - 1.0) / (gamma + 1.0)
     gm1 = gamma - 1.0
     g1 = gm1 / (2.0 * gamma)
@@ -404,12 +379,6 @@ def _exact_riemann_flux_normal(
     F = F.at[:, n_vars - 1].set(rho_Ev_s * u_n_s)
     return F
 
-
-# ---------------------------------------------------------------------------
-# Lax-Friedrichs in the normal frame
-# ---------------------------------------------------------------------------
-
-
 def _lax_friedrichs_flux_normal(
     U_Ln: Float[Array, "n_faces n_vars"],
     U_Rn: Float[Array, "n_faces n_vars"],
@@ -417,7 +386,7 @@ def _lax_friedrichs_flux_normal(
     p_R: Float[Array, "n_faces"],
     equation_manager: EquationManager,
 ) -> Float[Array, "n_faces n_vars"]:
-    """Local Lax-Friedrichs (Rusanov) flux in the face-normal frame."""
+    """Compute the local Lax-Friedrichs flux in the face-normal frame."""
     n_species = equation_manager.species.n_species
     rho_L = jnp.sum(U_Ln[:, :n_species], axis=1)
     rho_R = jnp.sum(U_Rn[:, :n_species], axis=1)
@@ -441,11 +410,6 @@ def _lax_friedrichs_flux_normal(
     return 0.5 * (F_L + F_R) - 0.5 * alpha[:, None] * (U_Rn - U_Ln)
 
 
-# ---------------------------------------------------------------------------
-# Main entry point: compute_flux_faces
-# ---------------------------------------------------------------------------
-
-
 @jax.named_call
 def compute_flux_faces(
     U_L: Float[Array, "n_faces n_variables"],
@@ -455,26 +419,7 @@ def compute_flux_faces(
     primitives_L: state_module.Primitives | None = None,
     primitives_R: state_module.Primitives | None = None,
 ) -> Float[Array, "n_faces n_variables"]:
-    """Compute numerical flux across faces.
-
-    Rotates to face-normal frame, dispatches to the selected flux scheme
-    (static at JIT trace time via equation_manager.numerics_config.flux_scheme),
-    then rotates back to Cartesian.
-
-    For a 1D mesh the face normals are [±1, 0], so the rotation is the
-    identity and no extra work is done.
-
-    Args:
-        U_L: Left states  [n_faces, n_variables]
-        U_R: Right states [n_faces, n_variables]
-        n_hat: Unit outward normals [n_faces, 2]
-        equation_manager: Contains species, numerics_config, etc.
-        primitives_L: Pre-extracted primitives for U_L (optional).
-        primitives_R: Pre-extracted primitives for U_R (optional).
-
-    Returns:
-        F: Numerical flux [n_faces, n_variables], in Cartesian coordinates.
-    """
+    """Compute the numerical flux across each face."""
     if primitives_L is None:
         primitives_L = state_module.extract_primitives_from_U(U_L, equation_manager)
     if primitives_R is None:
@@ -534,24 +479,12 @@ def compute_flux_faces(
     F = F.at[:, n_vars - 1].set(F_n[:, n_vars - 1])
     return F
 
-
-# ---------------------------------------------------------------------------
-# Face state reconstruction
-# ---------------------------------------------------------------------------
-
-
 def compute_face_states(
     U: Float[Array, "n_cells n_variables"],
     mesh: Mesh,
     equation_manager: EquationManager,
 ) -> tuple[Float[Array, "n_faces n_variables"], Float[Array, "n_faces n_variables"]]:
-    """First-order face states with ghost BCs applied at boundaries.
-
-    Interior faces: U_L = U[face_left], U_R = U[face_right].
-    Boundary faces: U_R = ghost state from boundary_conditions module.
-
-    Thin wrapper that delegates entirely to boundary_conditions.compute_face_states.
-    """
+    """Build first-order face states."""
     from compressible import boundary_conditions
 
     return boundary_conditions.compute_face_states(U, mesh, equation_manager)
@@ -562,17 +495,7 @@ def compute_face_states_muscl(
     mesh: Mesh,
     equation_manager: EquationManager,
 ) -> tuple[Float[Array, "n_faces n_variables"], Float[Array, "n_faces n_variables"]]:
-    """MUSCL-reconstructed face states.
-
-    For faces with a valid stencil (muscl_ll >= 0 / muscl_rr >= 0), applies
-    the slope-limited reconstruction.  Boundary faces fall back to first-order
-    (slope = 0) because no ghost-cell stencil is available.
-
-    Raises ValueError if called on a mesh where muscl_ll is all -1 (e.g.
-    an unstructured 2D mesh built with Mesh.from_gmsh).
-
-    The slope limiter is selected by equation_manager.numerics_config.slope_limiter.
-    """
+    """Build MUSCL-reconstructed face states."""
     from compressible import boundary_conditions
 
     # First-order face states (includes ghost states at boundaries)
@@ -633,11 +556,19 @@ def _slope(
         raise ValueError(f"Unknown slope limiter: {limiter!r}")
 
 
-def _minmod2(a, b):
+def _minmod2(
+    a: Float[Array, "n_faces n_vars"], b: Float[Array, "n_faces n_vars"]
+) -> Float[Array, "n_faces n_vars"]:
+    """Apply the two-argument minmod limiter."""
     return jnp.where(
         a * b > 0.0, jnp.sign(a) * jnp.minimum(jnp.abs(a), jnp.abs(b)), 0.0
     )
 
 
-def _minmod3(a, b, c):
+def _minmod3(
+    a: Float[Array, "n_faces n_vars"],
+    b: Float[Array, "n_faces n_vars"],
+    c: Float[Array, "n_faces n_vars"],
+) -> Float[Array, "n_faces n_vars"]:
+    """Apply the three-argument minmod limiter."""
     return _minmod2(a, _minmod2(b, c))
