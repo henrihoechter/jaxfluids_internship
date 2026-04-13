@@ -27,6 +27,30 @@ class BoundaryConditionArrays:
         BC_WALL_SLIP = 4     (Maxwell/Smoluchowski slip)
         BC_WALL_EULER = 5    (inviscid slip / symmetry / axis)
         BC_REFLECTIVE = 6    (reflect normal momentum; for 1D reflective BC)
+
+    Attributes:
+        bc_id: Boundary-condition identifier for each face.
+        inflow_rho: Prescribed inflow density for each face [kg/m^3].
+        inflow_u: Prescribed inflow x-velocity for each face [m/s].
+        inflow_v: Prescribed inflow y-velocity for each face [m/s].
+        inflow_T: Prescribed inflow translational-rotational temperature [K].
+        inflow_Tv: Prescribed inflow vibrational-electronic temperature [K].
+        inflow_Y: Prescribed inflow species mole fractions for each face.
+        wall_Tw: Wall translational temperature used by wall boundary models [K].
+        wall_Tvw: Wall vibrational temperature used when a wall model prescribes
+            a separate vibrational state [K].
+        wall_has_Tw: Mask selecting faces with an explicit wall temperature.
+        wall_has_Tvw: Mask selecting faces with an explicit vibrational wall
+            temperature.
+        wall_Y: Species composition applied at wall faces when provided.
+        wall_has_Y: Mask selecting faces with an explicit wall composition.
+        wall_u: Wall x-velocity for moving-wall or slip-wall models [m/s].
+        wall_v: Wall y-velocity for moving-wall or slip-wall models [m/s].
+        wall_sigma: Tangential momentum accommodation coefficient for slip-wall
+            models.
+        wall_alpha: Thermal accommodation coefficient for slip-wall models.
+        wall_dist: Distance from the face centroid to the wall reference point
+            used in slip/jump closures [m].
     """
 
     bc_id: Int[Array, "n_faces"]
@@ -44,8 +68,8 @@ class BoundaryConditionArrays:
     wall_has_Y: Bool[Array, "n_faces"]
     wall_u: Float[Array, "n_faces"]
     wall_v: Float[Array, "n_faces"]
-    wall_sigma_t: Float[Array, "n_faces"]
-    wall_sigma_v: Float[Array, "n_faces"]
+    wall_sigma: Float[Array, "n_faces"]
+    wall_alpha: Float[Array, "n_faces"]
     wall_dist: Float[Array, "n_faces"]
 
 
@@ -58,12 +82,13 @@ class EquationManager:
     run() / advance_one_step(). For 1D, construct the mesh with
     Mesh.from_1d_grid(); the state vector is always n+4 (rhov=0 for 1D).
 
-    Args:
-        species: Species thermodynamic data.
-        reactions: Chemical reaction table (None = frozen chemistry).
-        numerics_config: Numerical configuration.
-        transport_model: Transport property callable (None = inviscid).
-        boundary_arrays: Per-face BC specification. Build with
+    Attributes:
+        species: Species thermodynamic data used by all closures.
+        reactions: Chemical reaction table. Set to `None` for frozen chemistry.
+        numerics_config: Time-integration, reconstruction, and clipping settings.
+        transport_model: Transport-property callable. Set to `None` for inviscid
+            simulations.
+        boundary_arrays: Per-face boundary-condition specification. Build with
             boundary_conditions_utils.build_boundary_arrays_1d() for 1D or
             boundary_conditions_utils.build_boundary_arrays_2d() for 2D.
     """

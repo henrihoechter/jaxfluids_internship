@@ -116,7 +116,15 @@ def _load_bird_energy_data(
 def load_bird_characteristic_temperatures(
     data_path: str, species_names: Sequence[str]
 ) -> Float[Array, " n_species"]:
-    """Load Bird vibrational temperatures for the requested species."""
+    """Load Bird vibrational temperatures for the requested species.
+
+    Args:
+        data_path: Path to the Bird energy-model JSON data file.
+        species_names: Species names to extract in the desired order.
+
+    Returns:
+        Characteristic vibrational temperatures for the requested species [K].
+    """
     theta_vib, _, _ = _load_bird_energy_data(
         data_path, species_names, include_electronic=False
     )
@@ -131,7 +139,18 @@ def build_energy_model_from_config(
     is_monoatomic: Float[Array, " n_species"],
     molar_masses: Float[Array, " n_species"],
 ) -> EnergyModel:
-    """Build the configured energy model."""
+    """Build the configured energy model.
+
+    Args:
+        config: Energy-model configuration. Uses defaults when `None`.
+        species_names: Species names in solver order.
+        T_ref: Reference temperature used by the selected energy model [K].
+        is_monoatomic: Boolean mask identifying monoatomic species.
+        molar_masses: Species molar masses [kg/mol].
+
+    Returns:
+        Fully configured `EnergyModel` instance.
+    """
     if config is None:
         config = EnergyModelConfig()
 

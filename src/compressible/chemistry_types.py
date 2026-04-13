@@ -10,8 +10,6 @@ import jax.numpy as jnp
 import jaxtyping as jt
 from jaxtyping import Array, Float, Int
 from .energy_models_types import EnergyModel
-from .transport_models_types import CollisionIntegralTable
-
 
 ForwardRateFn = Callable[
     [
@@ -47,6 +45,39 @@ class SpeciesTable:
 
     This design keeps SpeciesTable JIT-compatible by storing energy model callables
     as static fields (not traced by JAX).
+
+    Attributes:
+        names: Ordered species names used throughout the solver.
+        molar_masses: Species molar masses [kg/mol].
+        h_s0: Reference enthalpy offsets converted to specific internal-energy
+            offsets [J/kg].
+        dissociation_energy: Species dissociation energies [J/kg]. Non-dissociating
+            species store `NaN`.
+        ionization_energy: Species ionization energies [J]. Species without an
+            ionization model store `NaN`.
+        vibrational_relaxation_factor: Millikan-White relaxation factor per
+            species. Species without a vibrational mode store `NaN`.
+        vibrational_relaxation_a_ms: Precomputed Millikan-White `a` coefficients
+            for molecule-partner pairs.
+        vibrational_relaxation_b_ms: Precomputed Millikan-White `b` coefficients
+            for molecule-partner pairs.
+        park_sigma_species: Base Park correction reference cross-section per
+            species [m^2]. Vibrating molecules without explicit data fall back
+            to 1e-21 m^2, while non-vibrating partners store 0.0 so the
+            runtime can derive a mixture-effective Park cross-section.
+        vibrational_relaxation_molecule_indices: Indices of species that are
+            treated as molecules in the relaxation model.
+        vibrational_relaxation_partner_indices: Indices of partner species used
+            in the relaxation tables.
+        theta_vib: Characteristic vibrational temperatures [K].
+        charge: Integer-like charge state per species (`-1`, `0`, or positive).
+        sigma_es_a: Electron-neutral collision fit coefficient `a` [m^2].
+        sigma_es_b: Electron-neutral collision fit coefficient `b` [m^2/K].
+        sigma_es_c: Electron-neutral collision fit coefficient `c` [m^2/K^2].
+        is_monoatomic: Boolean mask identifying monoatomic species.
+        T_ref: Reference temperature used by the energy model [K].
+        energy_model: Static energy-model callables associated with the species
+            set.
     """
 
     # Basic properties [n_species]
@@ -61,6 +92,7 @@ class SpeciesTable:
     vibrational_relaxation_factor: Float[jt.Array, " n_species"]  # [-]
     vibrational_relaxation_a_ms: Float[jt.Array, " n_molecules n_species"]  # [-]
     vibrational_relaxation_b_ms: Float[jt.Array, " n_molecules n_species"]  # [-]
+    park_sigma_species: Float[jt.Array, " n_species"]  # [m^2]
     vibrational_relaxation_molecule_indices: Int[jt.Array, " n_molecules"]
     vibrational_relaxation_partner_indices: Int[jt.Array, " n_species"]
     theta_vib: Float[jt.Array, " n_species"]  # [K]
@@ -122,6 +154,9 @@ class SpeciesTable:
             "vibrational_relaxation_b_ms shape "
             f"{self.vibrational_relaxation_b_ms.shape} != ({n_mol}, {n_partners})"
         )
+        assert self.park_sigma_species.shape == (n_sp,), (
+            "park_sigma_species shape " f"{self.park_sigma_species.shape} != ({n_sp},)"
+        )
         assert self.theta_vib.shape == (
             n_sp,
         ), f"theta_vib shape {self.theta_vib.shape} != ({n_sp},)"
@@ -155,7 +190,15 @@ class SpeciesTable:
         return len(self.names)
 
     def with_energy_model(self, energy_model: "EnergyModel") -> "SpeciesTable":
-        """Return a new SpeciesTable with a different energy model."""
+        """Return a copy of the table with a different energy model.
+
+        Args:
+            energy_model: Energy-model callables to attach to the copied table.
+
+        Returns:
+            New `SpeciesTable` instance with the same species data and the
+            supplied energy model.
+        """
         return dataclasses.replace(self, energy_model=energy_model)
 
     @property
@@ -177,6 +220,13 @@ class SpeciesTable:
     def has_vibrational_mode(self) -> Float[jt.Array, " n_species"]:
         """Boolean mask indicating which species have vibrational modes."""
         return jnp.isfinite(self.vibrational_relaxation_factor)
+
+    @property
+    def vibrational_relaxation_sigma_m(self) -> Float[jt.Array, " n_molecules"]:
+        """Backward-compatible molecule-only Park sigma view."""
+        return jnp.take(
+            self.park_sigma_species, self.vibrational_relaxation_molecule_indices
+        )
 
     @property
     def electron_index(self) -> int | None:
@@ -223,7 +273,14 @@ class SpeciesTable:
 
 @dataclass(frozen=True, eq=False)
 class ChemistryModel:
-    """Container for chemical kinetics model callables."""
+    """Container for chemical-kinetics model callables.
+
+    Attributes:
+        forward_rate_coefficient: Callable computing forward reaction-rate
+            coefficients for all reactions.
+        vibrational_reactive_source: Callable computing the vibrational source
+            term induced by chemistry.
+    """
 
     forward_rate_coefficient: ForwardRateFn
     vibrational_reactive_source: VibrationalSourceFn
@@ -231,7 +288,15 @@ class ChemistryModel:
 
 @dataclass(frozen=True)
 class ChemistryModelConfig:
-    """Configuration for selecting chemical kinetics models."""
+    """Configuration for selecting chemical-kinetics models.
+
+    Attributes:
+        model: Chemistry-model family to build.
+        park_vibrational_source: Park-model vibrational source closure.
+        qp_constant: Quasi-preferential constant used by the CVDV-QP model.
+        park_alpha: Vibrational-temperature blending factor used by the Park
+            model.
+    """
 
     model: Literal["park", "cvdv_qp"] = "park"
     park_vibrational_source: Literal["nonpreferential", "preferential_constant"] = (
@@ -347,11 +412,30 @@ class ReactionTable:
     def with_chemistry_model(
         self, chemistry_model: "ChemistryModel"
     ) -> "ReactionTable":
-        """Return a new ReactionTable with a different chemistry model."""
+        """Return a copy of the table with a different chemistry model.
+
+        Args:
+            chemistry_model: Chemistry-model callables to attach to the copied
+                reaction table.
+
+        Returns:
+            New `ReactionTable` instance with the same tabulated reaction data
+            and the supplied chemistry model.
+        """
         return dataclasses.replace(self, chemistry_model=chemistry_model)
 
     def get_species_index(self, name: str) -> int:
-        """Get the index of a species by name."""
+        """Return the index of a species in the reaction mechanism.
+
+        Args:
+            name: Species name to look up.
+
+        Returns:
+            Zero-based column index matching the stoichiometry arrays.
+
+        Raises:
+            ValueError: If the requested species is not part of the mechanism.
+        """
         try:
             return self.species_names.index(name)
         except ValueError:

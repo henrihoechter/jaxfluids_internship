@@ -110,7 +110,14 @@ def compute_cv_trans_rot(
 def compute_cv_t(
     molar_masses: Float[Array, " n_species"],
 ) -> Float[Array, " n_species"]:
-    """Compute translational Cv for each species."""
+    """Compute translational heat capacity for each species.
+
+    Args:
+        molar_masses: Species molar masses [kg/mol].
+
+    Returns:
+        Translational heat capacity `C_v,t` for each species [J/kg/K].
+    """
     R_s = constants.R_universal / molar_masses
     return 1.5 * R_s
 
@@ -119,7 +126,15 @@ def compute_cv_r(
     molar_masses: Float[Array, " n_species"],
     is_monoatomic: Float[Array, " n_species"],
 ) -> Float[Array, " n_species"]:
-    """Compute rotational Cv for each species."""
+    """Compute rotational heat capacity for each species.
+
+    Args:
+        molar_masses: Species molar masses [kg/mol].
+        is_monoatomic: Boolean mask identifying monoatomic species.
+
+    Returns:
+        Rotational heat capacity `C_v,r` for each species [J/kg/K].
+    """
     R_s = constants.R_universal / molar_masses
     return jnp.where(is_monoatomic, 0.0, 1.0 * R_s)
 
@@ -262,7 +277,17 @@ def compute_e_vibrational_from_harmonic_oscillator(
     characteristic_temperature: Float[Array, " n_species"],
     M: Float[Array, " n_species"],
 ) -> Float[Array, "n_species N"]:
-    """Compute vibrational energy for all species using a harmonic oscillator model."""
+    """Compute vibrational energy using a harmonic-oscillator model.
+
+    Args:
+        T_V: Vibrational temperature samples [K].
+        characteristic_temperature: Species vibrational characteristic
+            temperatures [K].
+        M: Species molar masses [kg/mol].
+
+    Returns:
+        Vibrational internal energy for every species and temperature [J/kg].
+    """
     # TODO(hhoechter): ideally characteristic_temperature should come from SpeciesTable
     T = jnp.atleast_1d(T_V)
     T_safe = jnp.maximum(T, 1e-12)
@@ -282,7 +307,17 @@ def compute_cv_vibrational_from_harmonic_oscillator(
     characteristic_temperature: Float[Array, " n_species"],
     M: Float[Array, " n_species"],
 ) -> Float[Array, "n_species N"]:
-    """Compute vibrational specific heat for a harmonic oscillator model."""
+    """Compute vibrational heat capacity for a harmonic-oscillator model.
+
+    Args:
+        T_V: Vibrational temperature samples [K].
+        characteristic_temperature: Species vibrational characteristic
+            temperatures [K].
+        M: Species molar masses [kg/mol].
+
+    Returns:
+        Vibrational heat capacity for every species and temperature [J/kg/K].
+    """
     T = jnp.atleast_1d(T_V)
     T_safe = jnp.maximum(T, 1e-12)
     theta = characteristic_temperature[:, None]
@@ -500,9 +535,7 @@ def compute_equilibrium_enthalpy(
     h = e_tr + e_ve + R_over_M[:, None] * T[None, :]
 
     T_ref = species_table.T_ref
-    cv_tr_ref = compute_cv_trans_rot(
-        jnp.array([T_ref]), species_table.is_monoatomic, M
-    )
+    cv_tr_ref = compute_cv_trans_rot(jnp.array([T_ref]), species_table.is_monoatomic, M)
     e_tr_ref = cv_tr_ref[:, 0] * T_ref
     e_ve_ref = compute_e_ve(jnp.array([T_ref]), species_table)[:, 0]
     h_ref_current = e_tr_ref + e_ve_ref + R_over_M * T_ref
@@ -554,6 +587,15 @@ def compute_cp_tr(
     """Compute translational-rotational C_p for all species.
 
     Uses C_p,tr = C_v,tr + R/M (ideal gas).
+
+    Args:
+        T: Temperature samples [K]. Included for interface consistency even
+            though the translational-rotational heat capacity is constant.
+        species_table: Species thermodynamic data.
+
+    Returns:
+        Translational-rotational heat capacity at constant pressure for every
+        species [J/kg/K].
     """
     cv_tr = compute_cv_trans_rot(
         T,
@@ -600,7 +642,15 @@ def compute_e_vib(
     T_V: Float[Array, " N"],
     species_table: "SpeciesTable",
 ) -> Float[Array, "n_species N"]:
-    """Compute vibrational internal energy for all species."""
+    """Compute vibrational internal energy for all species.
+
+    Args:
+        T_V: Vibrational temperature samples [K].
+        species_table: Species thermodynamic data.
+
+    Returns:
+        Vibrational internal energy for every species [J/kg].
+    """
     return species_table.energy_model.e_vib(T_V)
 
 
@@ -608,7 +658,15 @@ def compute_e_el(
     T_V: Float[Array, " N"],
     species_table: "SpeciesTable",
 ) -> Float[Array, "n_species N"]:
-    """Compute electronic internal energy for all species."""
+    """Compute electronic internal energy for all species.
+
+    Args:
+        T_V: Electronic-temperature samples [K].
+        species_table: Species thermodynamic data.
+
+    Returns:
+        Electronic internal energy for every species [J/kg].
+    """
     return species_table.energy_model.e_el(T_V)
 
 
@@ -661,7 +719,17 @@ def compute_electronic_energy_from_levels_batched(
     theta_el_i: Float[Array, "n_species n_levels"],
     molar_masses: Float[Array, " n_species"],
 ) -> Float[Array, "n_species N"]:
-    """Compute electronic energy for all species using padded electronic levels."""
+    """Compute electronic energy for all species using padded electronic levels.
+
+    Args:
+        T_el: Electronic-temperature samples [K].
+        g_i: Level degeneracies for every species.
+        theta_el_i: Electronic level temperatures for every species [K].
+        molar_masses: Species molar masses [kg/mol].
+
+    Returns:
+        Electronic internal energy for every species and temperature [J/kg].
+    """
     R_s = constants.R_universal / molar_masses
 
     def _single_species(
@@ -680,7 +748,17 @@ def compute_cv_electronic_from_levels(
     theta_el_i: Float[Array, " n_levels"],
     R_s: float | jnp.ndarray,
 ) -> Float[Array, " N"]:
-    """Compute electronic specific heat from discrete electronic levels."""
+    """Compute electronic heat capacity from discrete electronic levels.
+
+    Args:
+        T_el: Electronic-temperature samples [K].
+        g_i: Level degeneracies including the ground state.
+        theta_el_i: Electronic level temperatures including the ground state [K].
+        R_s: Species gas constant [J/kg/K].
+
+    Returns:
+        Electronic heat capacity at constant volume [J/kg/K].
+    """
     T_el = jnp.asarray(T_el)
     T_safe = jnp.maximum(T_el, 1e-12)
 
@@ -709,7 +787,17 @@ def compute_cv_electronic_from_levels_batched(
     theta_el_i: Float[Array, "n_species n_levels"],
     molar_masses: Float[Array, " n_species"],
 ) -> Float[Array, "n_species N"]:
-    """Compute electronic specific heat for all species using padded levels."""
+    """Compute electronic heat capacity for all species using padded levels.
+
+    Args:
+        T_el: Electronic-temperature samples [K].
+        g_i: Level degeneracies for every species.
+        theta_el_i: Electronic level temperatures for every species [K].
+        molar_masses: Species molar masses [kg/mol].
+
+    Returns:
+        Electronic heat capacity for every species and temperature [J/kg/K].
+    """
     R_s = constants.R_universal / molar_masses
 
     def _single_species(

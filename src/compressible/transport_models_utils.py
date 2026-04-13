@@ -18,7 +18,14 @@ from .transport_models_types import (
 
 
 def load_collision_integrals_from_json(filepath: str | Path) -> dict:
-    """Load raw collision-integral data from JSON."""
+    """Load raw collision-integral data from JSON.
+
+    Args:
+        filepath: Path to the collision-integral JSON file.
+
+    Returns:
+        Parsed JSON object containing the raw collision-integral tables.
+    """
     with Path(filepath).open("r", encoding="utf-8") as file:
         return json.load(file)
 
@@ -26,7 +33,14 @@ def load_collision_integrals_from_json(filepath: str | Path) -> dict:
 def create_collision_integral_table_from_json(
     filepath: str | Path,
 ) -> CollisionIntegralTable:
-    """Build a collision-integral table from JSON data."""
+    """Build a collision-integral table from JSON data.
+
+    Args:
+        filepath: Path to the collision-integral JSON file.
+
+    Returns:
+        Collision-integral table ready for the transport models.
+    """
     data = load_collision_integrals_from_json(filepath)
     pairs = data["pairs"]
 
@@ -48,7 +62,15 @@ def create_collision_integral_table_from_json(
 def load_casseau_transport_table(
     json_path: str | Path, species_names: Sequence[str]
 ) -> CasseauTransportTable:
-    """Load Casseau transport coefficients for the requested species."""
+    """Load Casseau transport coefficients for the requested species.
+
+    Args:
+        json_path: Path to the Casseau transport JSON file.
+        species_names: Species names to extract in solver order.
+
+    Returns:
+        Casseau transport table restricted to the requested species.
+    """
     data = json.loads(Path(json_path).read_text(encoding="utf-8"))
     entries = {entry["name"]: entry for entry in data["species"]}
 
@@ -86,7 +108,15 @@ def build_transport_model_from_config(
     *,
     species_table: chemistry_types.SpeciesTable,
 ) -> TransportModel:
-    """Build the configured transport model."""
+    """Build the configured transport model.
+
+    Args:
+        config: Transport-model configuration. Uses defaults when `None`.
+        species_table: Species data used to parameterize the transport model.
+
+    Returns:
+        Fully configured `TransportModel` instance.
+    """
     if config is None:
         config = TransportModelConfig()
 

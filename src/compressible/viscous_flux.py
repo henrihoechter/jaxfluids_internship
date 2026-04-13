@@ -147,7 +147,8 @@ def compute_viscous_flux_faces(
     interior_mask = face_right >= 0
     safe_r = jnp.where(interior_mask, face_right, face_left)
     c_L = c_s[face_left]
-    c_R = jnp.where(interior_mask[:, None], c_s[safe_r], c_L)
+    c_R_boundary = U_R[:, :n_species] / jnp.clip(rho_Rf[:, None], 1e-30, None)
+    c_R = jnp.where(interior_mask[:, None], c_s[safe_r], c_R_boundary)
 
     # Direct face gradients: grad_phi[f] = (phi_R - phi_L) * (x_R - x_L) / |x_R - x_L|^2
     #
@@ -175,7 +176,8 @@ def compute_viscous_flux_faces(
     inv_h2 = 1.0 / jnp.clip(dx_lr**2 + dy_lr**2, 1e-30)
     lr_over_h2 = jnp.stack([dx_lr * inv_h2, dy_lr * inv_h2], axis=1)  # (n_faces, 2)
 
-    # Use cell-centred primitives for the gradient stencil.
+    # Use cell-centred interior states for interior faces and the ghost state on
+    # boundary faces so wall BCs directly affect shear and heat fluxes.
     T_cell_c = cell_primitives.T
     Tv_cell_c = cell_primitives.Tv
     u_cell_c = cell_primitives.u
@@ -185,10 +187,10 @@ def compute_viscous_flux_faces(
     Tv_L_g = Tv_cell_c[face_left]
     u_L_g = u_cell_c[face_left]
     v_L_g = v_cell_c[face_left]
-    T_R_g = jnp.where(interior_mask, T_cell_c[safe_r], T_L_g)
-    Tv_R_g = jnp.where(interior_mask, Tv_cell_c[safe_r], Tv_L_g)
-    u_R_g = jnp.where(interior_mask, u_cell_c[safe_r], u_L_g)
-    v_R_g = jnp.where(interior_mask, v_cell_c[safe_r], v_L_g)
+    T_R_g = jnp.where(interior_mask, T_cell_c[safe_r], T_Rf)
+    Tv_R_g = jnp.where(interior_mask, Tv_cell_c[safe_r], Tv_Rf)
+    u_R_g = jnp.where(interior_mask, u_cell_c[safe_r], u_Rf)
+    v_R_g = jnp.where(interior_mask, v_cell_c[safe_r], v_Rf)
 
     grad_u = (u_R_g - u_L_g)[:, None] * lr_over_h2
     grad_v = (v_R_g - v_L_g)[:, None] * lr_over_h2

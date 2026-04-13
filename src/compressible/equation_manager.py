@@ -34,13 +34,24 @@ def _face_weights(
         cell_w = cell_areas
     return face_w, cell_w
 
+
 @jax.named_call
 def compute_divergence(
     F: Float[Array, "n_faces n_variables"],
     mesh: Mesh,
     equation_manager: EquationManager,
 ) -> Float[Array, "n_cells n_variables"]:
-    """Scatter the face fluxes into a cell-centered divergence."""
+    """Scatter the face fluxes into a cell-centered divergence.
+
+    Args:
+        F: Face fluxes in conserved variables.
+        mesh: Mesh providing face connectivity and geometric weights.
+        equation_manager: Solver configuration. Included for API consistency;
+            only mesh geometry is used here.
+
+    Returns:
+        Cell-centered flux divergence with the same variable ordering as `F`.
+    """
     face_left = jnp.asarray(mesh.face_left)
     face_right = jnp.asarray(mesh.face_right)
     face_w, cell_w = _face_weights(mesh)
@@ -67,7 +78,18 @@ def compute_cfl_dt(
     mesh: Mesh,
     equation_manager: EquationManager,
 ) -> float:
-    """Compute the CFL-limited time step."""
+    """Compute the CFL-limited time step.
+
+    Args:
+        U: Current cell-centered conserved state.
+        mesh: Mesh providing face geometry and connectivity.
+        equation_manager: Solver configuration containing the CFL number and
+            flux model.
+
+    Returns:
+        Stable explicit timestep estimate [s] based on the current face wave
+        speeds.
+    """
     U_L, U_R = boundary_conditions.compute_face_states(U, mesh, equation_manager)
     n_hat = jnp.asarray(mesh.face_normals)
 
@@ -145,6 +167,7 @@ def _compute_dU_dt(
 
     return dU_dt
 
+
 @jax.named_call
 def _clip_conserved_state(
     U: Float[Array, "n_cells n_variables"],
@@ -179,7 +202,20 @@ def advance_one_step(
     equation_manager: EquationManager,
     dt: float | None = None,
 ) -> Float[Array, "n_cells n_variables"]:
-    """Advance the solution by one time step."""
+    """Advance the solution by one time step.
+
+    Args:
+        U: Current cell-centered conserved state.
+        mesh: Mesh providing geometry and reconstruction stencils.
+        equation_manager: Solver configuration with numerics, physics, and
+            boundary conditions.
+        dt: Explicit timestep to use [s]. When `None`, the timestep is taken
+            from the configured fixed value or recomputed from the CFL limit.
+
+    Returns:
+        Updated conserved state after chemistry, transport, and convective
+        terms have been advanced by one step.
+    """
     if dt is None:
         if equation_manager.numerics_config.dt_mode == "cfl":
             dt = compute_cfl_dt(U, mesh, equation_manager)
@@ -206,6 +242,7 @@ def advance_one_step(
     S = source_terms.compute_source_terms(U, equation_manager, primitives=prim)
     U = U + 0.5 * dt * S
     return _clip_conserved_state(U, equation_manager)
+
 
 def _check_muscl(mesh: Mesh, equation_manager: EquationManager) -> None:
     """Check that MUSCL was requested on a mesh with a valid stencil."""
@@ -322,6 +359,18 @@ def run_scan(
     Float[Array, "n_snapshots"],
 ]:
     """Run the solver loop with `jax.lax.scan`.
+
+    Args:
+        U_init: Initial conserved state.
+        mesh: Unified mesh used by the solver.
+        equation_manager: Physics and numerics configuration.
+        t_final: Final simulation time [s] when `dt_array` is not provided.
+        save_interval: Save solution every `save_interval` time steps.
+        dt_array: Optional explicit per-step timestep sequence [s].
+
+    Returns:
+        Tuple `(U_history, t_history)` containing saved state snapshots and
+        their corresponding times.
 
     Raises:
         ValueError: If dt_mode is not 'fixed'.

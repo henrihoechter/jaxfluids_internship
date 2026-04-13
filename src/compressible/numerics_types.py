@@ -8,7 +8,32 @@ import jax
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True, slots=True)
 class ClippingConfig:
-    """Store clipping limits for primitive and conserved variables."""
+    """Store clipping limits for primitive, conserved, and transport variables.
+
+    Attributes:
+        rho_min: Minimum allowed mixture density during primitive extraction.
+        rho_max: Maximum allowed mixture density during primitive extraction.
+        p_min: Minimum allowed pressure [Pa].
+        p_max: Maximum allowed pressure [Pa].
+        T_min: Minimum allowed translational-rotational temperature [K].
+        T_max: Maximum allowed translational-rotational temperature [K].
+        Tv_min: Minimum allowed vibrational-electronic temperature [K].
+        Tv_max: Maximum allowed vibrational-electronic temperature [K].
+        Y_min: Minimum allowed species mole fraction.
+        Y_max: Maximum allowed species mole fraction.
+        rho_s_min: Minimum allowed species partial density [kg/m^3].
+        rho_s_max: Maximum allowed species partial density [kg/m^3].
+        rho_u_min: Minimum allowed x-momentum density [kg/m^2/s].
+        rho_u_max: Maximum allowed x-momentum density [kg/m^2/s].
+        rho_v_min: Minimum allowed y-momentum density [kg/m^2/s].
+        rho_v_max: Maximum allowed y-momentum density [kg/m^2/s].
+        rho_E_min: Minimum allowed total energy density [J/m^3].
+        rho_E_max: Maximum allowed total energy density [J/m^3].
+        rho_Ev_min: Minimum allowed vibrational energy density [J/m^3].
+        rho_Ev_max: Maximum allowed vibrational energy density [J/m^3].
+        D_s_min: Minimum allowed effective species diffusion coefficient [m^2/s].
+        D_s_max: Maximum allowed effective species diffusion coefficient [m^2/s].
+    """
 
     # Primitive variables
     rho_min: float = 1e-10
@@ -50,22 +75,26 @@ class NumericsConfig:
     compiles a separate kernel for each distinct configuration - 1D and 2D cases
     will always produce different compiled kernels.
 
-    Args:
-        dt: Fixed timestep. Use `None` for CFL stepping.
-        cfl: CFL number used when dt is None.
-        dt_mode: "fixed" or "cfl".
-        integrator_scheme: "forward-euler" or "rk2".
-        spatial_scheme: "first_order" or "muscl".
+    Attributes:
+        dt: Fixed timestep [s]. Use `None` for CFL-based stepping.
+        cfl: CFL number used when `dt` is `None`.
+        dt_mode: Timestep selection mode, either `"fixed"` or `"cfl"`.
+        integrator_scheme: Time integrator, either `"forward-euler"` or `"rk2"`.
+        spatial_scheme: Spatial reconstruction scheme, either `"first_order"` or
+            `"muscl"`.
             MUSCL requires Mesh.muscl_ll / muscl_rr stencil arrays to be set
             (populated by Mesh.from_1d_grid; set to -1 for unstructured 2D).
-        flux_scheme: "hllc", "exact_riemann", or "lax_friedrichs".
+        flux_scheme: Numerical flux scheme, either `"hllc"`,
+            `"exact_riemann"`, or `"lax_friedrichs"`.
             exact_riemann and lax_friedrichs are 1D-only by convention; they
             operate on the normal-frame state and work for any mesh, but are
             physically meaningful only for 1D problems.
-        slope_limiter: "minmod" or "mc". Used only when spatial_scheme="muscl".
+        slope_limiter: Limiter used by MUSCL reconstruction, either `"minmod"`
+            or `"mc"`.
         Geometry weighting (Cartesian vs. axisymmetric) is determined by the mesh,
             not by NumericsConfig.
-        clipping: Clipping limits applied after primitive extraction.
+        clipping: Clipping limits applied after primitive extraction and state
+            updates.
     """
 
     dt: float | None = field(metadata=dict(static=True))

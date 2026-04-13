@@ -113,13 +113,7 @@ def equilibrium_constant_casseau(
 
     T_safe = jnp.clip(T_rc, 1e-12, None)
     x = 1.0e4 / T_safe
-    exponent = (
-        A1 * (T_safe / 1.0e4)
-        + A2
-        + A3 * jnp.log(x)
-        + A4 * x
-        + A5 * x**2
-    )
+    exponent = A1 * (T_safe / 1.0e4) + A2 + A3 * jnp.log(x) + A4 * x + A5 * x**2
     return jnp.exp(jnp.clip(exponent, -_EXP_CLIP, _EXP_CLIP))
 
 
@@ -197,6 +191,14 @@ def validate_cvdv_reaction_table(
     """Validate that each dissociation reaction has exactly one molecular reactant.
 
     This is a non-JIT helper intended for pre-validation.
+
+    Args:
+        species_table: Species data used to identify molecular species.
+        reaction_table: Reaction mechanism to validate.
+
+    Returns:
+        `None`. Raises if any dissociation reaction has zero or multiple
+        molecular reactants.
     """
     import numpy as np
 
@@ -357,7 +359,15 @@ def _compute_vibrational_source_cvdv_qp(
 
 
 def build_cvdv_qp_chemistry_model() -> chemistry_types.ChemistryModel:
-    """Build the CVDV-QP chemistry model (Casseau/Marrone-Treanor)."""
+    """Build the CVDV-QP chemistry model (Casseau/Marrone-Treanor).
+
+    Args:
+        None.
+
+    Returns:
+        Chemistry-model callables implementing the CVDV-QP forward-rate and
+        vibrational-source closures.
+    """
 
     def forward_rate_coefficient(
         T: Float[Array, " n_cells"],
@@ -392,7 +402,15 @@ def build_cvdv_qp_chemistry_model() -> chemistry_types.ChemistryModel:
 def build_park_chemistry_model(
     config: ChemistryModelConfig | None = None,
 ) -> chemistry_types.ChemistryModel:
-    """Build the Park chemistry model (Arrhenius + Park vibrational source)."""
+    """Build the Park chemistry model (Arrhenius + Park vibrational source).
+
+    Args:
+        config: Chemistry-model configuration. Uses defaults when `None`.
+
+    Returns:
+        Chemistry-model callables implementing the Park forward-rate and
+        vibrational-source closures.
+    """
     if config is None:
         config = ChemistryModelConfig()
 

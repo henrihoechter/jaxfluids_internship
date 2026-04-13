@@ -36,8 +36,8 @@ def _empty_bc_arrays(n_faces: int, n_species: int) -> dict[str, np.ndarray]:
         wall_has_Y=np.zeros(n_faces, dtype=bool),
         wall_u=np.zeros(n_faces),
         wall_v=np.zeros(n_faces),
-        wall_sigma_t=np.ones(n_faces),
-        wall_sigma_v=np.ones(n_faces),
+        wall_sigma=np.ones(n_faces),
+        wall_alpha=np.ones(n_faces),
         wall_dist=np.ones(n_faces),
     )
 
@@ -60,8 +60,8 @@ def _finalize(d: dict[str, np.ndarray]) -> BoundaryConditionArrays:
         wall_has_Y=jnp.asarray(d["wall_has_Y"]),
         wall_u=jnp.asarray(d["wall_u"]),
         wall_v=jnp.asarray(d["wall_v"]),
-        wall_sigma_t=jnp.asarray(d["wall_sigma_t"]),
-        wall_sigma_v=jnp.asarray(d["wall_sigma_v"]),
+        wall_sigma=jnp.asarray(d["wall_sigma"]),
+        wall_alpha=jnp.asarray(d["wall_alpha"]),
         wall_dist=jnp.asarray(d["wall_dist"]),
     )
 
@@ -146,6 +146,13 @@ def build_boundary_arrays_1d_periodic(
     For periodic meshes, all faces are interior (face_right >= 0 always), so
     no BC evaluation is performed.  Returns an array of BC_OUTFLOW IDs that
     are never selected in practice.
+
+    Args:
+        mesh: Periodic 1D mesh built with `Mesh.from_1d_grid(periodic=True)`.
+        n_species: Number of species stored in the state vector.
+
+    Returns:
+        Boundary-condition arrays with placeholder values for all faces.
     """
     n_faces = mesh.face_left.shape[0]
     d = _empty_bc_arrays(n_faces, n_species)
@@ -237,10 +244,16 @@ def build_boundary_arrays_2d(
                 d["wall_u"][mask] = float(bc["u_wall"])
             if "v_wall" in bc:
                 d["wall_v"][mask] = float(bc["v_wall"])
-            if "sigma_t" in bc:
-                d["wall_sigma_t"][mask] = float(bc["sigma_t"])
-            if "sigma_v" in bc:
-                d["wall_sigma_v"][mask] = float(bc["sigma_v"])
+            # Legacy aliases preserve old input files while mapping to the
+            # Casseau/Maxwell notation used by the current implementation.
+            if "sigma" in bc:
+                d["wall_sigma"][mask] = float(bc["sigma"])
+            elif "sigma_v" in bc:
+                d["wall_sigma"][mask] = float(bc["sigma_v"])
+            if "alpha" in bc:
+                d["wall_alpha"][mask] = float(bc["alpha"])
+            elif "sigma_t" in bc:
+                d["wall_alpha"][mask] = float(bc["sigma_t"])
         else:
             raise ValueError(f"Unknown boundary condition type: {bc_type!r}")
 

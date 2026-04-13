@@ -129,7 +129,7 @@ def compute_vibrational_relaxation(
     e_v_eq = thermodynamic_relations.compute_e_ve(T, equation_manager.species)
     e_v_actual = thermodynamic_relations.compute_e_ve(T_v, equation_manager.species)
 
-    tau_v = compute_relaxation_time_2_casseau(Y_s, rho, T, p, equation_manager)
+    tau_v = compute_relaxation_time_casseau(Y_s, rho, T, p, equation_manager)
 
     delta_e_v_s = e_v_eq - e_v_actual
 
@@ -141,84 +141,14 @@ def compute_vibrational_relaxation(
     return jnp.sum(Q_s, axis=0)
 
 
-def compute_relaxation_time(
-    Y_s: Float[Array, "n_cells n_species"],
-    rho: Float[Array, " n_cells"],
-    T: Float[Array, " n_cells"],
-    T_v: Float[Array, " n_cells"],
-    p: Float[Array, " n_cells"],
-    equation_manager: EquationManager,
-) -> Float[Array, "n_species n_cells"]:
-    """Compute Millikan-White relaxation time with Park correction (NASA TP-2867).
-
-    Implements Eq. 55 (Millikan-White), Eq. 56 (Park correction), and Eq. 58
-    (blending). Atoms receive tau = 1e30.
-
-    Args:
-        Y_s: Mole fractions.
-        rho: Density [kg/m^3].
-        T: Translational temperature [K].
-        T_v: Vibrational temperature [K].
-        p: Pressure [Pa].
-        equation_manager: Contains species data.
-
-    Returns:
-        tau_v: Relaxation time per species [s].
-    """
-    species = equation_manager.species
-    n_cells = T.shape[0]
-    n_species = species.n_species
-
-    M_s = species.molar_masses  # [kg/mol]
-    A_s = species.vibrational_relaxation_factor  # NaN for atoms
-    is_monoatomic = species.is_monoatomic
-
-    M_mix = jnp.sum(Y_s * M_s[None, :], axis=1)  # [kg/mol]
-    n_total = rho * constants.N_A / (M_mix + 1e-30)  # [1/m^3]
-    n_j = Y_s * n_total[:, None]
-
-    # TODO: this does not reflect electrons to not be considered
-    n_total = jnp.sum(n_j, axis=1)
-
-    p_atm = p / constants.ATM_TO_PA  # [atm]
-
-    M_s_amu = M_s * 1000.0  # kg/mol -> g/mol = amu
-    mu_sj = (M_s_amu[:, None] * M_s_amu[None, :]) / (
-        M_s_amu[:, None] + M_s_amu[None, :] + 1e-30
-    )
-
-    T_term = T ** (-1.0 / 3.0)
-    A_s_safe = jnp.where(jnp.isnan(A_s), 0.0, A_s)
-    mu_term = 0.015 * (mu_sj**0.25)
-
-    exp_arg = (
-        A_s_safe[None, :, None] * (T_term[:, None, None] - mu_term[None, :, :]) - 18.42
-    )
-    exp_arg = jnp.clip(exp_arg, -700, 700)
-    exp_values = jnp.exp(exp_arg)
-    numerator = jnp.sum(n_j[:, None, :] * exp_values, axis=2)
-    tau_MW = numerator / (p_atm[:, None] * n_total[:, None] + 1e-30)
-
-    m_s = M_s / constants.N_A
-    c_bar_s = jnp.sqrt(8.0 * constants.k * T[:, None] / (jnp.pi * m_s[None, :]))
-
-    SIGMA_V = (3e-21 * (50000.0 / T) ** 2)  # [m^2], Casseau Eq. 2.64
-    tau_P = 1.0 / (SIGMA_V * c_bar_s * n_j + 1e-30)
-
-    tau_v = tau_MW + tau_P
-    tau_v = jnp.where(is_monoatomic[None, :], 1e30, tau_v)
-
-    return tau_v.T
-
-
-def compute_relaxation_time_2_casseau(
+def compute_relaxation_time_casseau(
     Y_s: Float[Array, "n_cells n_species"],
     rho: Float[Array, " n_cells"],
     T: Float[Array, " n_cells"],
     p: Float[Array, " n_cells"],
     equation_manager: EquationManager,
 ) -> Float[Array, "n_species n_cells"]:
-    """Compute vibrational relaxation time using pairwise Millikan-White and Park data.
+    """Compute vibrational relaxation time using pairwise MW and mixture-effective Park data.
 
     Mixture average for each vibrating species m:
         tau_m = sum_s(X_s) / sum_s(X_s / (tau_mw_ms + tau_p_ms))
@@ -256,6 +186,8 @@ def compute_relaxation_time_2_casseau(
 
     M_m = jnp.take(M_s, molecule_indices)
     M_p = jnp.take(M_s, partner_indices)
+    sigma_species = species.park_sigma_species
+    sigma_p = jnp.take(sigma_species, partner_indices)
     M_m_amu = M_m * 1000.0  # kg/mol -> g/mol
     M_p_amu = M_p * 1000.0
     mu_ms = (M_m_amu[:, None] * M_p_amu[None, :]) / (
@@ -271,8 +203,14 @@ def compute_relaxation_time_2_casseau(
     exp_arg = jnp.clip(exp_arg, -700.0, 700.0)
     tau_mw_ms = jnp.exp(exp_arg) / jnp.clip(p_atm, 1e-300, None)[:, None, None]
 
-    sigma_m = 1e-21  # [m^2], Casseau
-    sigma_v = sigma_m * (50000.0 / jnp.clip(T, 1e-12, None)) ** 2
+    # Casseau Eq. 2.62 uses sigma_v,m without a partner index, so the Park
+    # correction should use a single effective sigma for each vibrating mode
+    # within the current mixture rather than a distinct sigma_m-s for each pair.
+    X_partner_sum = jnp.sum(X_s, axis=1, keepdims=True)
+    sigma_eff = jnp.sum(X_s * sigma_p[None, :], axis=1, keepdims=True) / jnp.clip(
+        X_partner_sum, 1e-300, None
+    )
+    sigma_v_m = sigma_eff * (50000.0 / jnp.clip(T[:, None], 1e-12, None)) ** 2
 
     cbar_m = jnp.sqrt(
         8.0 * constants.R_universal * T[:, None] / (jnp.pi * (M_m[None, :] + 1e-300))
@@ -280,7 +218,7 @@ def compute_relaxation_time_2_casseau(
 
     denom_p = (
         cbar_m[:, :, None]
-        * sigma_v[:, None, None]
+        * sigma_v_m[:, :, None]
         * jnp.clip(n_partner[:, None, :], 1e-300, None)
     )
     tau_p_ms = 1.0 / (denom_p + 1e-300)
@@ -414,7 +352,12 @@ def compute_eT_relaxation(
     nu_es = jnp.zeros((n_cells, species.n_species))
 
     nu_es_neutral = compute_electron_neutral_collision_frequency(
-        n_s, T_e, M_e, species.sigma_es_a, species.sigma_es_b, species.sigma_es_c,
+        n_s,
+        T_e,
+        M_e,
+        species.sigma_es_a,
+        species.sigma_es_b,
+        species.sigma_es_c,
     )
     neutral_mask = species.is_neutral
     nu_es = jnp.where(neutral_mask[None, :], nu_es_neutral, nu_es)

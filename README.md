@@ -14,6 +14,7 @@ JAX-based compressible flow solver with support for thermochemical nonequilibriu
 python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+pip install -e .
 ```
 
 ## Project Structure

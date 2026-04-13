@@ -8,11 +8,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, Float
 
 from . import constants, thermodynamic_relations
-from .energy_models_types import EnergyModel, EnergyModelConfig
-from .energy_models_utils import (
-    build_energy_model_from_config,
-    load_bird_characteristic_temperatures,
-)
+from .energy_models_types import EnergyModel
 
 
 def _zeros_like_species(
@@ -21,6 +17,7 @@ def _zeros_like_species(
     """Return a zero energy array with one row per species."""
     T = jnp.atleast_1d(T_V)
     return jnp.zeros((n_species, T.shape[0]))
+
 
 def build_gnoffo_energy_model(
     *,
@@ -31,7 +28,20 @@ def build_gnoffo_energy_model(
     is_monoatomic: Float[Array, " n_species"],
     molar_masses: Float[Array, " n_species"],
 ) -> EnergyModel:
-    """Build the Gnoffo energy model."""
+    """Build the Gnoffo energy model.
+
+    Args:
+        T_ref: Reference temperature used by the integrated energy curves [K].
+        T_limit_low: Lower bound of each polynomial temperature range [K].
+        T_limit_high: Upper bound of each polynomial temperature range [K].
+        enthalpy_coeffs: Enthalpy polynomial coefficients for each species and
+            temperature range.
+        is_monoatomic: Boolean mask identifying monoatomic species.
+        molar_masses: Species molar masses [kg/mol].
+
+    Returns:
+        Energy-model callables backed by the Gnoffo polynomial fits.
+    """
     e_ve = functools.partial(
         thermodynamic_relations.compute_e_vib_electronic,
         T_ref=T_ref,
@@ -77,7 +87,22 @@ def build_bird_energy_model(
     is_monoatomic: Float[Array, " n_species"],
     include_electronic: bool = True,
 ) -> EnergyModel:
-    """Build the Bird energy model."""
+    """Build the Bird harmonic-oscillator energy model.
+
+    Args:
+        characteristic_temperature: Species vibrational characteristic
+            temperatures [K].
+        g_i: Padded electronic level degeneracies for each species.
+        theta_el_i: Padded electronic level temperatures for each species [K].
+        molar_masses: Species molar masses [kg/mol].
+        is_monoatomic: Boolean mask identifying monoatomic species.
+        include_electronic: Whether electronic modes are added to the
+            vibrational model.
+
+    Returns:
+        Energy-model callables backed by the Bird vibrational/electronic
+        formulas.
+    """
     e_vib = functools.partial(
         thermodynamic_relations.compute_e_vibrational_from_harmonic_oscillator,
         characteristic_temperature=characteristic_temperature,

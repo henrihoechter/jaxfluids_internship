@@ -26,6 +26,7 @@
         "h_s0": 0.0,
         "dissociation_energy": 3.36e7,
         "ionization_energy": 15.51,
+        "park_sigma_m": 3e-21,
         "vibrational_relaxation_factor": {
             "N": {
                 "a": 180.0,
@@ -64,6 +65,7 @@
         "h_s0": 0.0,
         "dissociation_energy": 1.54e7,
         "ionization_energy": 12.5,
+        "park_sigma_m": 3e-21,
         "vibrational_relaxation_factor": {
             "N": {
                 "a": 72.4,
@@ -102,6 +104,7 @@
         "h_s0": 21.6009,
         "dissociation_energy": 2.09e7,
         "ionization_energy": 9.5,
+        "park_sigma_m": 3e-21,
         "vibrational_relaxation_factor": {
             "N": {
                 "a": 49.5,

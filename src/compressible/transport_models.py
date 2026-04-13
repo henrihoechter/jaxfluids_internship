@@ -28,7 +28,17 @@ def build_gnoffo_transport_model(
     collision_integrals: CollisionIntegralTable | None,
     include_diffusion: bool,
 ) -> TransportModel:
-    """Build the Gnoffo transport model."""
+    """Build the Gnoffo transport model.
+
+    Args:
+        species_table: Species data used by the transport closures.
+        collision_integrals: Collision-integral table, or `None` for inviscid
+            fallback behaviour.
+        include_diffusion: Whether diffusion coefficients should be computed.
+
+    Returns:
+        Transport-model wrapper around the Gnoffo transport-property function.
+    """
     compute_transport_properties = functools.partial(
         compute_transport_properties_gnoffo,
         species_table=species_table,
@@ -45,7 +55,19 @@ def build_casseau_transport_model(
     collision_integrals: CollisionIntegralTable | None,
     include_diffusion: bool,
 ) -> TransportModel:
-    """Build the Casseau transport model."""
+    """Build the Casseau transport model.
+
+    Args:
+        species_table: Species data used by the transport closures.
+        casseau_transport: Species transport coefficients from the Casseau
+            model.
+        collision_integrals: Collision-integral table used for optional
+            diffusion coefficients.
+        include_diffusion: Whether diffusion coefficients should be computed.
+
+    Returns:
+        Transport-model wrapper around the Casseau transport-property function.
+    """
     compute_transport_properties = functools.partial(
         compute_transport_properties_casseau,
         species_table=species_table,
@@ -78,9 +100,7 @@ def _zeros_transport(
 def _compute_molar_concentrations(
     Y_s: Float[Array, "n_cells n_species"],
     molar_masses: Float[Array, " n_species"],
-) -> tuple[
-    Float[Array, "n_cells n_species"], Float[Array, "n_cells n_species"]
-]:
+) -> tuple[Float[Array, "n_cells n_species"], Float[Array, "n_cells n_species"]]:
     """Compute concentration arrays used by the transport models."""
     Y_M = Y_s * molar_masses[None, :]
     c_s = Y_M / jnp.sum(Y_M, axis=1, keepdims=True)
@@ -93,7 +113,17 @@ def interpolate_collision_integral(
     omega_2000K: Float[Array, " n_pairs"],
     omega_4000K: Float[Array, " n_pairs"],
 ) -> Float[Array, "... n_pairs"]:
-    """Interpolate collision integrals in log-temperature space."""
+    """Interpolate collision integrals in log-temperature space.
+
+    Args:
+        T: Temperatures at which to evaluate the collision integrals [K].
+        omega_2000K: Log10 collision-integral values at 2000 K.
+        omega_4000K: Log10 collision-integral values at 4000 K.
+
+    Returns:
+        Interpolated collision integrals with one trailing dimension per stored
+        species pair.
+    """
     slope = (omega_4000K - omega_2000K) / (LN_T_REF_HIGH - LN_T_REF_LOW)
     ln_T = jnp.log(jnp.clip(T, 300.0, 50000.0))
     log10_omega = omega_2000K + slope * (ln_T[..., None] - LN_T_REF_LOW)
@@ -107,7 +137,18 @@ def compute_modified_collision_integral_1(
     pi_omega_11: Float[Array, "... n_pairs"],
     pair_indices_sr: Int[Array, "n_species n_species"],
 ) -> Float[Array, "... n_species n_species"]:
-    """Compute the first modified collision integral."""
+    """Compute the first modified collision integral.
+
+    Args:
+        T: Temperatures at which to evaluate the integral [K].
+        M_s: Species molar masses for the first index [kg/mol].
+        M_r: Species molar masses for the second index [kg/mol].
+        pi_omega_11: Interpolated `pi*Omega^(1,1)` values for stored pairs.
+        pair_indices_sr: Lookup table mapping species pairs to pair rows.
+
+    Returns:
+        Modified collision integral `delta^(1)` for every species pair.
+    """
     M_s_grid, M_r_grid = jnp.meshgrid(M_s, M_r, indexing="ij")
     mass_factor = jnp.sqrt(
         2.0
@@ -128,7 +169,18 @@ def compute_modified_collision_integral_2(
     pi_omega_22: Float[Array, "... n_pairs"],
     pair_indices_sr: Int[Array, "n_species n_species"],
 ) -> Float[Array, "... n_species n_species"]:
-    """Compute the second modified collision integral."""
+    """Compute the second modified collision integral.
+
+    Args:
+        T: Temperatures at which to evaluate the integral [K].
+        M_s: Species molar masses for the first index [kg/mol].
+        M_r: Species molar masses for the second index [kg/mol].
+        pi_omega_22: Interpolated `pi*Omega^(2,2)` values for stored pairs.
+        pair_indices_sr: Lookup table mapping species pairs to pair rows.
+
+    Returns:
+        Modified collision integral `delta^(2)` for every species pair.
+    """
     M_s_grid, M_r_grid = jnp.meshgrid(M_s, M_r, indexing="ij")
     mass_factor = jnp.sqrt(
         2.0 * M_s_grid * M_r_grid / (jnp.pi * R_UNIVERSAL * (M_s_grid + M_r_grid))
@@ -143,7 +195,16 @@ def build_pair_index_matrix(
     species_names: tuple[str, ...],
     collision_integrals: CollisionIntegralTable,
 ) -> Int[Array, "n_species n_species"]:
-    """Build a lookup matrix from species pairs to collision-integral rows."""
+    """Build a lookup matrix from species pairs to collision-integral rows.
+
+    Args:
+        species_names: Species names in solver order.
+        collision_integrals: Collision-integral table to index into.
+
+    Returns:
+        Matrix whose `(i, j)` entry gives the row index for the `(species_i,
+        species_j)` pair, with a self-pair fallback when needed.
+    """
     n_species = len(species_names)
     indices = jnp.zeros((n_species, n_species), dtype=jnp.int32)
 
@@ -153,7 +214,9 @@ def build_pair_index_matrix(
                 pair_index = collision_integrals.get_pair_index(species_s, species_r)
             except ValueError:
                 try:
-                    pair_index = collision_integrals.get_pair_index(species_s, species_s)
+                    pair_index = collision_integrals.get_pair_index(
+                        species_s, species_s
+                    )
                 except ValueError:
                     pair_index = 0
             indices = indices.at[i, j].set(pair_index)
@@ -167,13 +230,22 @@ def compute_mixture_viscosity(
     M_s: Float[Array, " n_species"],
     delta_2_sr: Float[Array, "n_cells n_species n_species"],
 ) -> Float[Array, " n_cells"]:
-    """Compute the Gnoffo mixture viscosity."""
+    """Compute the Gnoffo mixture viscosity.
+
+    Args:
+        T: Cell temperatures [K]. Included for API symmetry with related
+            helpers.
+        gamma_s: Molar concentration ratios used by the Gnoffo formulas.
+        M_s: Species molar masses [kg/mol].
+        delta_2_sr: Modified collision integrals `delta^(2)` for each pair.
+
+    Returns:
+        Mixture viscosity for each cell [Pa*s].
+    """
     del T
     m_s = M_s / constants.N_A
     denominator_per_s = jnp.einsum("cr,csr->cs", gamma_s, delta_2_sr)
-    return jnp.sum(
-        m_s * gamma_s / jnp.clip(denominator_per_s, 1e-30, None), axis=-1
-    )
+    return jnp.sum(m_s * gamma_s / jnp.clip(denominator_per_s, 1e-30, None), axis=-1)
 
 
 def compute_translational_thermal_conductivity(
@@ -182,17 +254,29 @@ def compute_translational_thermal_conductivity(
     M_s: Float[Array, " n_species"],
     delta_2_sr: Float[Array, "n_cells n_species n_species"],
 ) -> Float[Array, " n_cells"]:
-    """Compute the Gnoffo translational thermal conductivity."""
+    """Compute the Gnoffo translational thermal conductivity.
+
+    Args:
+        T: Cell temperatures [K]. Included for API symmetry with related
+            helpers.
+        gamma_s: Molar concentration ratios used by the Gnoffo formulas.
+        M_s: Species molar masses [kg/mol].
+        delta_2_sr: Modified collision integrals `delta^(2)` for each pair.
+
+    Returns:
+        Translational thermal conductivity for each cell [W/m/K].
+    """
     del T
     M_s_grid, M_r_grid = jnp.meshgrid(M_s, M_s, indexing="ij")
     m_ratio = M_s_grid / M_r_grid
-    a_sr = 1.0 + (1.0 - m_ratio) * (0.45 - 2.54 * m_ratio) / jnp.square(
-        1.0 + m_ratio
-    )
+    a_sr = 1.0 + (1.0 - m_ratio) * (0.45 - 2.54 * m_ratio) / jnp.square(1.0 + m_ratio)
     weighted_delta = a_sr[None, :, :] * delta_2_sr
     denominator_per_s = jnp.einsum("cr,csr->cs", gamma_s, weighted_delta)
-    return 15.0 * constants.k / 4.0 * jnp.sum(
-        gamma_s / jnp.clip(denominator_per_s, 1e-30, None), axis=-1
+    return (
+        15.0
+        * constants.k
+        / 4.0
+        * jnp.sum(gamma_s / jnp.clip(denominator_per_s, 1e-30, None), axis=-1)
     )
 
 
@@ -202,7 +286,18 @@ def compute_rotational_thermal_conductivity(
     is_molecule: Bool[Array, " n_species"],
     delta_1_sr: Float[Array, "n_cells n_species n_species"],
 ) -> Float[Array, " n_cells"]:
-    """Compute the Gnoffo rotational thermal conductivity."""
+    """Compute the Gnoffo rotational thermal conductivity.
+
+    Args:
+        T: Cell temperatures [K]. Included for API symmetry with related
+            helpers.
+        gamma_s: Molar concentration ratios used by the Gnoffo formulas.
+        is_molecule: Boolean mask selecting molecular species.
+        delta_1_sr: Modified collision integrals `delta^(1)` for each pair.
+
+    Returns:
+        Rotational thermal conductivity for each cell [W/m/K].
+    """
     del T
     denominator_per_s = jnp.einsum("cr,csr->cs", gamma_s, delta_1_sr)
     return constants.k * jnp.sum(
@@ -217,7 +312,17 @@ def compute_vibrational_thermal_conductivity(
     is_molecule: Bool[Array, " n_species"],
     delta_1_sr: Float[Array, "n_cells n_species n_species"],
 ) -> Float[Array, " n_cells"]:
-    """Compute the Gnoffo vibrational thermal conductivity."""
+    """Compute the Gnoffo vibrational thermal conductivity.
+
+    Args:
+        T_v: Vibrational temperatures for each cell [K].
+        gamma_s: Molar concentration ratios used by the Gnoffo formulas.
+        is_molecule: Boolean mask selecting molecular species.
+        delta_1_sr: Modified collision integrals `delta^(1)` for each pair.
+
+    Returns:
+        Vibrational thermal conductivity for each cell [W/m/K].
+    """
     return compute_rotational_thermal_conductivity(
         T_v, gamma_s, is_molecule, delta_1_sr
     )
@@ -228,7 +333,16 @@ def compute_binary_diffusion_coefficient(
     p: Float[Array, " n_cells"],
     delta_1_sr: Float[Array, "n_cells n_species n_species"],
 ) -> Float[Array, "n_cells n_species n_species"]:
-    """Compute the Gnoffo binary diffusion coefficients."""
+    """Compute the Gnoffo binary diffusion coefficients.
+
+    Args:
+        T: Cell temperatures [K].
+        p: Cell pressures [Pa].
+        delta_1_sr: Modified collision integrals `delta^(1)` for each pair.
+
+    Returns:
+        Binary diffusion coefficients for every species pair [m^2/s].
+    """
     return (
         constants.k
         * T[:, None, None]
@@ -241,7 +355,16 @@ def compute_effective_diffusion_coefficient(
     M_s: Float[Array, " n_species"],
     D_sr: Float[Array, "n_cells n_species n_species"],
 ) -> Float[Array, "n_cells n_species"]:
-    """Compute the Gnoffo effective diffusion coefficients."""
+    """Compute the Gnoffo effective diffusion coefficients.
+
+    Args:
+        gamma_s: Molar concentration ratios used by the Gnoffo formulas.
+        M_s: Species molar masses [kg/mol].
+        D_sr: Binary diffusion coefficients for every species pair [m^2/s].
+
+    Returns:
+        Effective diffusion coefficient for each species in each cell [m^2/s].
+    """
     n_species = gamma_s.shape[1]
     gamma_t = jnp.sum(gamma_s, axis=-1, keepdims=True)
     numerator = jnp.square(gamma_t) * M_s * (1.0 - M_s * gamma_s)
@@ -255,7 +378,15 @@ def compute_species_viscosity_blottner(
     T: Float[Array, " n_cells"],
     table: CasseauTransportTable,
 ) -> Float[Array, "n_species n_cells"]:
-    """Compute species viscosity using the Casseau Blottner law."""
+    """Compute species viscosity using the Casseau Blottner law.
+
+    Args:
+        T: Cell temperatures [K].
+        table: Casseau transport coefficients for the active species set.
+
+    Returns:
+        Species viscosities for every species and cell [Pa*s].
+    """
     log_T = jnp.log(jnp.clip(T, 1e-12, None))
     A = table.blottner_A[:, None]
     B = table.blottner_B[:, None]
@@ -268,7 +399,16 @@ def compute_species_viscosity_powerlaw(
     table: CasseauTransportTable,
     molar_masses: Float[Array, " n_species"],
 ) -> Float[Array, "n_species n_cells"]:
-    """Compute species viscosity using the Casseau power-law form."""
+    """Compute species viscosity using the Casseau power-law form.
+
+    Args:
+        T: Cell temperatures [K].
+        table: Casseau transport coefficients for the active species set.
+        molar_masses: Species molar masses [kg/mol].
+
+    Returns:
+        Species viscosities for every species and cell [Pa*s].
+    """
     m_s = molar_masses / constants.N_A
     d_ref = table.d_ref
     omega = table.omega
@@ -292,7 +432,20 @@ def compute_species_kappa_eucken(
     Float[Array, "n_species n_cells"],
     Float[Array, "n_species n_cells"],
 ]:
-    """Compute species conductivities using the Casseau Eucken relations."""
+    """Compute species conductivities using the Casseau Eucken relations.
+
+    Args:
+        T: Translational temperatures [K]. Included for interface symmetry.
+        T_v: Vibrational temperatures [K]. Included for interface symmetry.
+        mu_s: Species viscosities [Pa*s].
+        molar_masses: Species molar masses [kg/mol].
+        is_monoatomic: Boolean mask identifying monoatomic species.
+        cv_ve: Species vibrational-electronic heat capacities [J/kg/K].
+
+    Returns:
+        Tuple `(eta_t, eta_r, eta_v)` containing translational, rotational, and
+        vibrational species conductivities [W/m/K].
+    """
     del T, T_v
     cv_t = thermodynamic_relations.compute_cv_t(molar_masses)
     cv_r = thermodynamic_relations.compute_cv_r(molar_masses, is_monoatomic)
@@ -308,14 +461,22 @@ def wilke_mixing(
     X_s: Float[Array, "n_cells n_species"],
     molar_masses: Float[Array, " n_species"],
 ) -> Float[Array, " n_cells"]:
-    """Mix a species property with the Wilke rule."""
+    """Mix a species property with the Wilke rule.
+
+    Args:
+        prop_s: Species property to mix for every species and cell.
+        mu_s: Species viscosities used in the Wilke weighting [Pa*s].
+        X_s: Species mole fractions for each cell.
+        molar_masses: Species molar masses [kg/mol].
+
+    Returns:
+        Mixture property evaluated with Wilke's mixing rule.
+    """
     X_sc = X_s.T
     mu_safe = jnp.clip(mu_s, 1e-30, None)
     mu_ratio = mu_safe[:, None, :] / mu_safe[None, :, :]
     mass_ratio = (molar_masses[None, :, None] / molar_masses[:, None, None]) ** 0.25
-    denom = jnp.sqrt(
-        8.0 * (1.0 + (molar_masses[:, None] / molar_masses[None, :]))
-    )
+    denom = jnp.sqrt(8.0 * (1.0 + (molar_masses[:, None] / molar_masses[None, :])))
     term = (1.0 + jnp.sqrt(mu_ratio) * mass_ratio) ** 2 / denom[:, :, None]
     term = term * (1.0 - jnp.eye(molar_masses.shape[0])[:, :, None])
     phi = X_sc + jnp.sum(X_sc[None, :, :] * term, axis=1)
@@ -336,7 +497,22 @@ def compute_casseau_transport_properties(
     Float[Array, " n_cells"],
     Float[Array, " n_cells"],
 ]:
-    """Compute the Casseau mixture transport properties."""
+    """Compute the Casseau mixture transport properties.
+
+    Args:
+        T: Translational temperatures for each cell [K].
+        T_v: Vibrational temperatures for each cell [K].
+        X_s: Species mole fractions for each cell.
+        molar_masses: Species molar masses [kg/mol].
+        is_monoatomic: Boolean mask identifying monoatomic species.
+        cv_ve: Species vibrational-electronic heat capacities [J/kg/K].
+        table: Casseau transport coefficients for the active species set.
+
+    Returns:
+        Tuple `(mu, eta_t, eta_r, eta_v)` containing mixture viscosity,
+        translational conductivity, rotational conductivity, and vibrational
+        conductivity.
+    """
     mu_s = compute_species_viscosity_blottner(T, table)
     eta_t_s, eta_r_s, eta_v_s = compute_species_kappa_eucken(
         T, T_v, mu_s, molar_masses, is_monoatomic, cv_ve
@@ -365,7 +541,25 @@ def compute_transport_properties_gnoffo(
     Float[Array, " n_cells"],
     Float[Array, "n_cells n_species"],
 ]:
-    """Compute transport properties with the Gnoffo model."""
+    """Compute transport properties with the Gnoffo model.
+
+    Args:
+        T: Translational temperatures for each cell [K].
+        T_v: Vibrational temperatures for each cell [K].
+        p: Pressures for each cell [Pa].
+        Y_s: Species mole fractions for each cell.
+        rho: Mixture densities for each cell [kg/m^3].
+        species_table: Species data used by the transport model.
+        collision_integrals: Collision-integral table, or `None` for inviscid
+            fallback behaviour.
+        include_diffusion: Whether effective diffusion coefficients are
+            computed.
+
+    Returns:
+        Tuple `(mu, eta_t, eta_r, eta_v, D_s)` containing viscosity,
+        translational conductivity, rotational conductivity, vibrational
+        conductivity, and effective species diffusion coefficients.
+    """
     del rho
     n_cells = T.shape[0]
     n_species = species_table.n_species
@@ -438,7 +632,26 @@ def compute_transport_properties_casseau(
     Float[Array, " n_cells"],
     Float[Array, "n_cells n_species"],
 ]:
-    """Compute transport properties with the Casseau model."""
+    """Compute transport properties with the Casseau model.
+
+    Args:
+        T: Translational temperatures for each cell [K].
+        T_v: Vibrational temperatures for each cell [K].
+        p: Pressures for each cell [Pa].
+        Y_s: Species mole fractions for each cell.
+        rho: Mixture densities for each cell [kg/m^3].
+        species_table: Species data used by the transport model.
+        casseau_transport: Casseau coefficient table for the active species set.
+        collision_integrals: Collision-integral table used for optional
+            diffusion coefficients.
+        include_diffusion: Whether effective diffusion coefficients are
+            computed.
+
+    Returns:
+        Tuple `(mu, eta_t, eta_r, eta_v, D_s)` containing viscosity,
+        translational conductivity, rotational conductivity, vibrational
+        conductivity, and effective species diffusion coefficients.
+    """
     del rho
     n_cells = T.shape[0]
     n_species = species_table.n_species
@@ -490,7 +703,22 @@ def compute_transport_properties(
     Float[Array, " n_cells"],
     Float[Array, "n_cells n_species"],
 ]:
-    """Compute transport properties for the active transport model."""
+    """Compute transport properties for the active transport model.
+
+    Args:
+        T: Translational temperatures for each cell [K].
+        T_v: Vibrational temperatures for each cell [K].
+        p: Pressures for each cell [Pa].
+        Y_s: Species mole fractions for each cell.
+        rho: Mixture densities for each cell [kg/m^3].
+        equation_manager: Solver configuration holding the active transport
+            model.
+
+    Returns:
+        Tuple `(mu, eta_t, eta_r, eta_v, D_s)` containing viscosity,
+        translational conductivity, rotational conductivity, vibrational
+        conductivity, and effective species diffusion coefficients.
+    """
     transport_model = equation_manager.transport_model
     if transport_model is None:
         return _zeros_transport(T.shape[0], equation_manager.species.n_species)

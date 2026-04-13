@@ -20,7 +20,19 @@ def compute_speed_of_sound(
     Tv: Float[Array, "n"],
     equation_manager: EquationManager,
 ) -> Float[Array, "n"]:
-    """Compute the frozen speed of sound."""
+    """Compute the frozen speed of sound.
+
+    Args:
+        rho: Mixture density for each state [kg/m^3].
+        p: Mixture pressure for each state [Pa].
+        Y_s: Species mole fractions for each state.
+        T: Translational-rotational temperature for each state [K].
+        Tv: Vibrational-electronic temperature for each state [K].
+        equation_manager: Solver configuration providing species thermodynamics.
+
+    Returns:
+        Frozen speed of sound for each state [m/s].
+    """
     cp = thermodynamic_relations.compute_cp(T, equation_manager.species)
     cv_tr = thermodynamic_relations.compute_cv_tr(T, equation_manager.species)
 
@@ -32,6 +44,7 @@ def compute_speed_of_sound(
     cv_tr_mix = jnp.sum(c_s * cv_tr.T, axis=1)
     gamma_frozen = cp_mix / (cv_tr_mix + 1e-14)
     return jnp.sqrt(gamma_frozen * p / (rho + 1e-14))
+
 
 def _compute_physical_flux_normal(
     U: Float[Array, "n_faces n_vars"],
@@ -58,6 +71,7 @@ def _compute_physical_flux_normal(
     F = F.at[:, n_vars - 2].set((rho_E + p) * u_n)
     F = F.at[:, n_vars - 1].set(rho_Ev * u_n)
     return F
+
 
 def _hllc_star_state_normal(
     U: Float[Array, "n n_vars"],
@@ -147,6 +161,7 @@ def _hllc_flux_normal(
     F = jnp.where(mask4, F_R, F)
 
     return F
+
 
 def _exact_pressure_function(
     p_star: Float[Array, "n"],
@@ -379,6 +394,7 @@ def _exact_riemann_flux_normal(
     F = F.at[:, n_vars - 1].set(rho_Ev_s * u_n_s)
     return F
 
+
 def _lax_friedrichs_flux_normal(
     U_Ln: Float[Array, "n_faces n_vars"],
     U_Rn: Float[Array, "n_faces n_vars"],
@@ -419,7 +435,19 @@ def compute_flux_faces(
     primitives_L: state_module.Primitives | None = None,
     primitives_R: state_module.Primitives | None = None,
 ) -> Float[Array, "n_faces n_variables"]:
-    """Compute the numerical flux across each face."""
+    """Compute the numerical flux across each face.
+
+    Args:
+        U_L: Conserved state on the left side of each face.
+        U_R: Conserved state on the right side of each face.
+        n_hat: Unit face normals pointing from left to right.
+        equation_manager: Solver configuration selecting the flux scheme.
+        primitives_L: Optional primitive variables corresponding to `U_L`.
+        primitives_R: Optional primitive variables corresponding to `U_R`.
+
+    Returns:
+        Numerical flux array for each face in Cartesian conserved variables.
+    """
     if primitives_L is None:
         primitives_L = state_module.extract_primitives_from_U(U_L, equation_manager)
     if primitives_R is None:
@@ -479,12 +507,23 @@ def compute_flux_faces(
     F = F.at[:, n_vars - 1].set(F_n[:, n_vars - 1])
     return F
 
+
 def compute_face_states(
     U: Float[Array, "n_cells n_variables"],
     mesh: Mesh,
     equation_manager: EquationManager,
 ) -> tuple[Float[Array, "n_faces n_variables"], Float[Array, "n_faces n_variables"]]:
-    """Build first-order face states."""
+    """Build first-order face states.
+
+    Args:
+        U: Cell-centered conserved state.
+        mesh: Mesh providing face connectivity and normals.
+        equation_manager: Solver configuration with boundary conditions.
+
+    Returns:
+        Tuple `(U_L, U_R)` of left and right conserved states at every face
+        using first-order reconstruction.
+    """
     from compressible import boundary_conditions
 
     return boundary_conditions.compute_face_states(U, mesh, equation_manager)
@@ -495,7 +534,17 @@ def compute_face_states_muscl(
     mesh: Mesh,
     equation_manager: EquationManager,
 ) -> tuple[Float[Array, "n_faces n_variables"], Float[Array, "n_faces n_variables"]]:
-    """Build MUSCL-reconstructed face states."""
+    """Build MUSCL-reconstructed face states.
+
+    Args:
+        U: Cell-centered conserved state.
+        mesh: Mesh providing face connectivity and MUSCL stencil indices.
+        equation_manager: Solver configuration selecting the slope limiter.
+
+    Returns:
+        Tuple `(U_L, U_R)` of left and right conserved states at every face
+        after MUSCL reconstruction and boundary-state insertion.
+    """
     from compressible import boundary_conditions
 
     # First-order face states (includes ghost states at boundaries)

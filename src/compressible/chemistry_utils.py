@@ -94,6 +94,7 @@ def _build_vibrational_relaxation_tables(
     for m_idx in molecule_indices:
         m_name = names[m_idx]
         raw_value = vibrational_relaxation_raw[m_idx]
+
         if isinstance(raw_value, dict):
             row_a: list[float] = []
             row_b: list[float] = []
@@ -121,9 +122,7 @@ def _build_vibrational_relaxation_tables(
             b_rows.append([jnp.nan] * len(non_e_names))
 
     if missing:
-        details = "; ".join(
-            f"{name}: {partners}" for name, partners in missing.items()
-        )
+        details = "; ".join(f"{name}: {partners}" for name, partners in missing.items())
         raise ValueError(
             "Missing vibrational relaxation factors for collision partners: "
             f"{details}"
@@ -144,12 +143,50 @@ def _build_vibrational_relaxation_tables(
     )
 
 
-def load_equilibrium_enthalpy_curve_fits(json_path: str, species_name: str) -> tuple[
+def _build_park_sigma_species(
+    charge: Float[Array, " n_species"],
+    is_monoatomic: Float[Array, " n_species"],
+    park_sigma_m_raw: Sequence[object | None],
+) -> Float[Array, " n_species"]:
+    """Build base Park correction cross-sections for each species.
+
+    Vibrating molecules use their explicit Park value when provided and otherwise
+    fall back to Park's original 1e-21 m^2. Electrons and non-vibrating species
+    store zero so the runtime can derive a mixture-effective correction.
+    """
+    sigma_values: list[float] = []
+    for species_charge, mono, sigma_raw in zip(
+        charge.tolist(), is_monoatomic.tolist(), park_sigma_m_raw
+    ):
+        if species_charge == -1:
+            sigma_values.append(0.0)
+        elif sigma_raw is not None:
+            sigma_values.append(float(sigma_raw))
+        elif mono:
+            sigma_values.append(0.0)
+        else:
+            sigma_values.append(1e-21)
+
+    return jnp.array(sigma_values) if sigma_values else jnp.zeros(0)
+
+
+def load_equilibrium_enthalpy_curve_fits(
+    json_path: str, species_name: str
+) -> tuple[
     Float[Array, " n_ranges"],
     Float[Array, " n_ranges"],
     Float[Array, "n_parameters n_ranges"],
 ]:
-    """Load equilibrium enthalpy curve fits for one species."""
+    """Load equilibrium enthalpy curve fits for one species.
+
+    Args:
+        json_path: Path to the equilibrium-enthalpy fit JSON file.
+        species_name: Species name whose piecewise fits should be extracted.
+
+    Returns:
+        Tuple of lower bounds, upper bounds, and polynomial parameters for the
+        requested species.
+    """
     json_path = Path(json_path)
     with json_path.open("r", encoding="utf-8") as f:
         raw_data = json.load(f)
@@ -193,13 +230,15 @@ def load_species_table(
     """Load species data and return as SpeciesTable.
 
     Args:
-        general_data_path: Path to JSON file with general species data
-        equilibrium_enthalpy: Path to JSON file with enthalpy curve fits
-        species_names: Names of species to load (defaults to all)
-        energy_model_config: Energy model configuration (data_path selects model data)
+        species_names: Species names to load in solver order. Passing `None`
+            loads every species present in the JSON file.
+        general_data_path: Path to the JSON file containing general species
+            properties.
+        energy_model_config: Energy-model configuration. Its `data_path`
+            selects the auxiliary energy-model dataset to load.
 
     Returns:
-        SpeciesTable with all data as vectorized arrays
+        Species table containing vectorized thermodynamic and chemistry data.
     """
     general_data_path = Path(general_data_path)
     with general_data_path.open("r", encoding="utf-8") as f:
@@ -219,6 +258,7 @@ def load_species_table(
     ionization_energy = []
     vibrational_relaxation_factor = []
     vibrational_relaxation_raw = []
+    park_sigma_m_raw = []
     charge = []
     sigma_es_a = []
     sigma_es_b = []
@@ -244,6 +284,7 @@ def load_species_table(
             ionization_energy_value if ionization_energy_value is not None else jnp.nan
         )
         vibrational_relaxation_raw.append(vibrational_relaxation_value)
+        park_sigma_m_raw.append(entry.get("park_sigma_m"))
         vibrational_relaxation_scalar = _extract_vibrational_relaxation_scalar(
             entry["name"], vibrational_relaxation_value
         )
@@ -279,6 +320,9 @@ def load_species_table(
     ) = _build_vibrational_relaxation_tables(
         names_tuple, charge, is_monoatomic, vibrational_relaxation_raw
     )
+    park_sigma_species = _build_park_sigma_species(
+        charge, is_monoatomic, park_sigma_m_raw
+    )
 
     energy_model = energy_models_utils.build_energy_model_from_config(
         energy_model_config,
@@ -303,6 +347,7 @@ def load_species_table(
         vibrational_relaxation_factor=vibrational_relaxation_factor,
         vibrational_relaxation_a_ms=vibrational_relaxation_a_ms,
         vibrational_relaxation_b_ms=vibrational_relaxation_b_ms,
+        park_sigma_species=park_sigma_species,
         vibrational_relaxation_molecule_indices=vibrational_relaxation_molecule_indices,
         vibrational_relaxation_partner_indices=vibrational_relaxation_partner_indices,
         theta_vib=theta_vib,
@@ -523,15 +568,12 @@ def load_reactions_from_json(
     reaction_order = jnp.sum(reactant_stoich, axis=1)
     C_f = C_f * jnp.power(constants.N_A, reaction_order - 1.0)
 
-
     if chemistry_model_config.model.lower() == "cvdv_qp":
         chemistry_model = chemistry.build_cvdv_qp_chemistry_model()
     elif chemistry_model_config.model.lower() == "park":
         chemistry_model = chemistry.build_park_chemistry_model(chemistry_model_config)
     else:
-        raise ValueError(
-            f"Unsupported chemistry model: {chemistry_model_config.model}"
-        )
+        raise ValueError(f"Unsupported chemistry model: {chemistry_model_config.model}")
 
     return ReactionTable(
         species_names=tuple(species_names),

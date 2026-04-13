@@ -13,7 +13,17 @@ from .equation_manager_types import EquationManager
 
 
 class Primitives(NamedTuple):
-    """Primitive variables extracted from the conserved state."""
+    """Primitive variables extracted from the conserved state.
+
+    Attributes:
+        Y_s: Species mole fractions for each cell.
+        rho: Mixture density for each cell [kg/m^3].
+        u: X-velocity component for each cell [m/s].
+        v: Y-velocity component for each cell [m/s].
+        T: Translational-rotational temperature for each cell [K].
+        Tv: Vibrational-electronic temperature for each cell [K].
+        p: Mixture pressure for each cell [Pa].
+    """
 
     Y_s: Float[Array, "n_cells n_species"]
     rho: Float[Array, "n_cells"]
@@ -29,7 +39,18 @@ def extract_primitives_from_U(
     U: Float[Array, "n_cells n_variables"],
     equation_manager: EquationManager,
 ) -> Primitives:
-    """Extract primitive variables from the conserved state."""
+    """Extract primitive variables from the conserved state.
+
+    Args:
+        U: Conserved state array with species densities, momenta, total energy,
+            and vibrational energy for each cell.
+        equation_manager: Solver configuration providing species data and
+            clipping limits.
+
+    Returns:
+        Primitive state tuple containing composition, density, velocity,
+        temperatures, and pressure for each cell.
+    """
     n_species = equation_manager.species.n_species
 
     rho_s = U[:, :n_species]
@@ -106,7 +127,15 @@ def extract_primitives(
     U: Float[Array, "n_cells n_variables"],
     equation_manager: EquationManager,
 ) -> Primitives:
-    """Call `extract_primitives_from_U`."""
+    """Extract primitive variables from the conserved state.
+
+    Args:
+        U: Conserved state array with shape `(n_cells, n_variables)`.
+        equation_manager: Solver configuration providing thermodynamic closures.
+
+    Returns:
+        Primitive state tuple for each cell.
+    """
     return extract_primitives_from_U(U, equation_manager)
 
 
@@ -119,7 +148,21 @@ def compute_U_from_primitives(
     T_V: Float[Array, "n_cells"],
     equation_manager: EquationManager,
 ) -> Float[Array, "n_cells n_variables"]:
-    """Build the conserved state from primitive variables."""
+    """Build the conserved state from primitive variables.
+
+    Args:
+        Y_s: Species mole fractions for each cell.
+        rho: Mixture density for each cell [kg/m^3].
+        u: X-velocity component for each cell [m/s].
+        v: Y-velocity component for each cell [m/s].
+        T_tr: Translational-rotational temperature for each cell [K].
+        T_V: Vibrational-electronic temperature for each cell [K].
+        equation_manager: Solver configuration providing species data and energy
+            closures.
+
+    Returns:
+        Conserved state array with shape `(n_cells, n_species + 4)`.
+    """
     n_species = equation_manager.species.n_species
     M_s = equation_manager.species.M_s
     n_cells = rho.shape[0]

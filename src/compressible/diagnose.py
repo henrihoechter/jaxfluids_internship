@@ -12,7 +12,14 @@ ATOL = 1e-6
 
 
 def runtime_check_array_sizes(function: Callable[..., object]) -> Callable[..., object]:
-    """Wrap a function with runtime jaxtyping checks."""
+    """Wrap a function with runtime jaxtyping checks.
+
+    Args:
+        function: Callable to wrap with runtime shape and type validation.
+
+    Returns:
+        Wrapped callable that performs `jaxtyping` checks before execution.
+    """
     return jt.jaxtyped(typechecker=beartype)(function)
 
 
@@ -22,7 +29,17 @@ def check_conservation(
     debug: bool = False,
     abort: bool = True,
 ) -> None:
-    """Check that the total conserved variables match a reference state."""
+    """Check that the total conserved variables match a reference state.
+
+    Args:
+        U: Current conserved state with variables along axis 0.
+        U_ref: Reference conserved state used for comparison.
+        debug: Whether to print per-variable totals before checking.
+        abort: Whether to raise when the conservation check fails.
+
+    Returns:
+        `None`. Raises when `abort` is true and the totals differ.
+    """
     if debug:
         print(
             f"Mass: \t\tU={jnp.sum(U[0, :]):2.5e}, \tU_ref={jnp.sum(U_ref[0, :]):2.5e}, \tdiff (abs)={jnp.sum(U[0, :]) - jnp.sum(U_ref[0, :]):2.5e}"
@@ -44,7 +61,14 @@ def check_conservation(
 
 
 def check_nonnegativity(U: jt.Float[jt.Array, "n_variables n_cells"]) -> None:
-    """Check that mass and energy densities stay nonnegative."""
+    """Check that mass and energy densities stay nonnegative.
+
+    Args:
+        U: Conserved state with variables along axis 0.
+
+    Returns:
+        `None`. Raises if mass or energy density becomes negative.
+    """
     if jnp.any(U[0, :] < 0.0):
         raise ValueError("Mass density negative.")
 
@@ -53,7 +77,14 @@ def check_nonnegativity(U: jt.Float[jt.Array, "n_variables n_cells"]) -> None:
 
 
 def check_nan_inf(U: jt.Float[jt.Array, "n_variables n_cells"]) -> None:
-    """Check that the state does not contain NaN or Inf values."""
+    """Check that the state does not contain NaN or Inf values.
+
+    Args:
+        U: Conserved state with variables along axis 0.
+
+    Returns:
+        `None`. Raises if `U` contains NaN or Inf values.
+    """
     if jnp.any(jnp.isnan(U)):
         raise ValueError("NaN values present in solution.")
 
@@ -67,16 +98,32 @@ def check_all(
     debug: bool,
     abort: bool = True,
 ) -> None:
-    """Run all diagnostic checks on the current state."""
+    """Run all diagnostic checks on the current state.
+
+    Args:
+        U: Current conserved state with variables along axis 0.
+        U_ref: Reference conserved state used for the conservation check.
+        debug: Whether to print conservation totals.
+        abort: Whether failed conservation should raise.
+
+    Returns:
+        `None`. Raises if any diagnostic check fails.
+    """
     check_nan_inf(U)
     check_nonnegativity(U)
     check_conservation(U, U_ref, debug, abort)
 
 
-def live_diagnostics(
-    U: jt.Float[jt.Array, "n_variables n_cells"], step: int
-) -> None:
-    """Print a compact live diagnostic line."""
+def live_diagnostics(U: jt.Float[jt.Array, "n_variables n_cells"], step: int) -> None:
+    """Print a compact live diagnostic line.
+
+    Args:
+        U: Conserved state with variables along axis 0.
+        step: Current time-step index.
+
+    Returns:
+        `None`. Writes a one-line diagnostic summary to stdout.
+    """
     print(
         f"step {step}, \tmass density max-min: {jnp.max(U[0, :]) - jnp.min(U[0, :]):.4e}"
     )

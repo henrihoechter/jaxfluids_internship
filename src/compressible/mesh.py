@@ -12,7 +12,29 @@ import numpy as np
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Mesh:
-    """Store the mesh arrays used by the solver."""
+    """Store the mesh arrays used by the solver.
+
+    Attributes:
+        nodes: Node coordinates with shape `(n_nodes, 2)`.
+        cells: Cell-to-node connectivity as a list of node-index arrays.
+        face_nodes: Node indices for each face with shape `(n_faces, 2)`.
+        legacy_mesh2d: Original legacy mesh object when the mesh was converted
+            from `compressible_2d_`.
+        cell_centroids: Cell centroid coordinates with shape `(n_cells, 2)`.
+        cell_areas: Cell measures with shape `(n_cells,)`.
+        cell_r: Radial coordinate used for axisymmetric weighting per cell.
+        face_left: Left-cell index for each face.
+        face_right: Right-cell index for each face, or `-1` on boundaries.
+        face_normals: Unit normals pointing from left to right cell.
+        face_areas: Face measures with shape `(n_faces,)`.
+        face_centroids: Face centroid coordinates with shape `(n_faces, 2)`.
+        face_r: Radial coordinate used for axisymmetric weighting per face.
+        boundary_tags: Boundary tag for each face, or `-1` for interior faces.
+        muscl_ll: Far-left stencil index used by MUSCL reconstruction.
+        muscl_rr: Far-right stencil index used by MUSCL reconstruction.
+        axisymmetric: Whether geometry weighting should use the radial
+            coordinates.
+    """
 
     # Construction-time / plotting metadata (not used by solver kernels)
     nodes: np.ndarray  # (n_nodes, 2)
@@ -56,6 +78,9 @@ class Mesh:
             periodic: If True, wrap connectivity so face 0 connects to the
                 last cell and the last face connects back to cell 0.
                 Periodic meshes have no boundary faces (face_right >= 0 always).
+
+        Returns:
+            Mesh representing the 1D grid in the solver's unified mesh format.
         """
         x_coords = np.asarray(x_coords, dtype=float)
         n_cells = len(x_coords) - 1
@@ -165,6 +190,9 @@ class Mesh:
             nodes: Node coordinates (n_nodes, 2).
             cells: Iterable of node-index lists defining each cell.
             boundary_edges: Iterable of (n1, n2, tag) for boundary edges.
+
+        Returns:
+            Mesh assembled from the provided polygonal cell connectivity.
         """
         nodes = np.asarray(nodes, dtype=float)
         cell_list = [np.asarray(c, dtype=int) for c in cells]
@@ -267,7 +295,14 @@ class Mesh:
 
     @classmethod
     def from_gmsh(cls, path: str | Path) -> "Mesh":
-        """Read a Gmsh .msh file and return a Mesh."""
+        """Read a Gmsh `.msh` file and return a mesh.
+
+        Args:
+            path: Path to the Gmsh mesh file.
+
+        Returns:
+            Mesh loaded from the file.
+        """
         return _read_gmsh(path)
 
     @classmethod
@@ -279,7 +314,19 @@ class Mesh:
         axis_tag: int | None = None,
         axis_tol: float = 1e-10,
     ) -> "Mesh":
-        """Read a thin-wedge 3D Gmsh v2 mesh and extract the 2D cross-section."""
+        """Read a thin-wedge 3D Gmsh v2 mesh and extract the 2D cross-section.
+
+        Args:
+            path: Path to the Gmsh mesh file.
+            wedge_plane_tag: Physical tag identifying the wedge plane to
+                extract.
+            remap_tags: Optional mapping applied to the extracted boundary tags.
+            axis_tag: Optional physical tag identifying the symmetry axis.
+            axis_tol: Tolerance used when detecting axis-aligned entities.
+
+        Returns:
+            Mesh representing the extracted 2D wedge plane.
+        """
         from compressible_2d_.mesh_gmsh import read_gmsh_v2_wedge_plane
 
         mesh2d = read_gmsh_v2_wedge_plane(
